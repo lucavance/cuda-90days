@@ -1,8 +1,9 @@
 # Repository Collaboration Rules
 
-## Daily CUDA Interactive Q&A Mode
+## Daily Interactive Q&A Mode
 
-When the user says they want to study CUDA through interactive questions:
+When the user says they want to study CUDA or another technical topic through
+interactive questions:
 
 1. Ask 10 concept-understanding questions, one at a time.
 2. Wait for the user's answer before moving to the next question.
@@ -24,10 +25,19 @@ When the user says they want to study CUDA through interactive questions:
    - correct answers
    - summary
 8. Do not save the user's original answers in the daily record.
+9. Saved interactive learning records must display the following content in
+   paired Chinese and English:
+   - topic and goal
+   - every question
+   - every explanation
+   - every correct answer
+   - summary, common mistakes, and next steps
+10. Before committing a saved learning record, re-check that all required
+    sections are present in both languages.
 
-## 每日 CUDA 交互问答学习模式
+## 每日交互问答学习模式
 
-当用户说想通过交互问答学习 CUDA 时：
+当用户说想通过交互问答学习 CUDA 或其他技术主题时：
 
 1. 一次只出 1 道题，总共 10 道概念理解题。
 2. 等用户回答后，再进入下一题。
@@ -49,3 +59,10 @@ When the user says they want to study CUDA through interactive questions:
    - 正确答案
    - 总结
 8. 每日记录中不保存用户的原始回答。
+9. 保存的交互学习记录必须将以下内容以中英配对形式展示：
+   - 主题和目标
+   - 每一道问题
+   - 每一道解说
+   - 每一道正确答案
+   - 总结、常见错误和下一步建议
+10. 提交学习记录前，重新检查所有必要部分是否均包含中文和英文。
