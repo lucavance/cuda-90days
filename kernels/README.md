@@ -1,6 +1,9 @@
-# Kernels
+# Kernels / 核函数
 
-本目录用于存放可复用或对照性质的 kernel 实验。
+**English:** This directory contains reusable or comparative kernel
+experiments.
 
-- `cuda_cpp/`: CUDA C++ kernel
-- `cuda_oxide/`: Rust / cuda-oxide kernel
+**中文：** 本目录用于存放可复用或用于对照的 kernel 实验。
+
+- `cuda_cpp/`: CUDA C++ kernels / CUDA C++ kernel
+- `cuda_oxide/`: Rust `cuda-oxide` kernels / Rust `cuda-oxide` kernel

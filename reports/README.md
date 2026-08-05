@@ -1,8 +1,12 @@
-# Reports
+# Reports / 报告
 
-本目录用于保存阶段复盘和最终报告。
+**English:** This directory stores progress reviews and the final report.
 
-建议每 15 天输出一次复盘：
+**中文：** 本目录用于保存阶段复盘和最终报告。
+
+**English:** Produce one review every 15 days:
+
+**中文：** 建议每 15 天输出一次复盘：
 
 - `day001_015.md`
 - `day016_030.md`
@@ -12,10 +16,12 @@
 - `day076_090.md`
 - `final_report.md`
 
-每篇复盘建议覆盖：
+**English:** Each review should cover:
 
-- 已完成实验
-- correctness 与 benchmark 结果
-- profiling 结论
-- 主要阻塞
-- 下一阶段调整
+**中文：** 每篇复盘建议覆盖：
+
+- Completed experiments / 已完成实验
+- Correctness and benchmark results / correctness 与 benchmark 结果
+- Profiling conclusions / profiling 结论
+- Primary blockers / 主要阻塞
+- Adjustments for the next stage / 下一阶段调整
