@@ -1,176 +1,296 @@
-# Day 008: Shared Memory Bank Conflict
+# Day 008: Shared Memory Bank Conflicts / Shared memory 存储体冲突
 
-Date: 2026-06-12
+Date / 日期: 2026-06-12
 
-## 今日目标
+## Topic / 主题
 
-今天继续 CUDA 主线，学习 shared memory bank conflict 的基础直觉。重点理解 warp、shared memory bank、连续访问、stride 访问、padding，以及为什么 matrix transpose 常用 `tile[32][33]`。
+**English:** Warps, shared-memory banks, contiguous and strided access, bank
+conflicts, row-major indexing, padding, and the `tile[32][33]` transpose
+pattern.
 
-## 10 个概念问题
+**中文：** warp、shared memory bank、连续与跨步访问、bank conflict、row-major
+索引、padding，以及 transpose 中的 `tile[32][33]` 模式。
 
-### 1. shared memory bank 是什么
+## Goal / 目标
 
-**Question:** 在 CUDA 里，`shared memory bank` 大概是什么？请从 shared memory 为什么会被分成多个 bank、一个 warp 里的多个 thread 同时访问 shared memory 时什么情况下比较快、什么情况下可能发生 bank conflict 几个角度解释。
+**English:** Understand why a fast memory can still become slow under a poor
+access pattern and how padding changes bank mapping.
 
-**Explanation:** shared memory 内部不是一整块单通道内存，而是分成多个可以并行访问的小通道，通常叫 banks，中文可以理解为存储体。
+**中文：** 理解高速 shared memory 为什么仍会因不良访问模式变慢，以及 padding
+如何改变 bank 映射。
 
-**Correct Answer:** shared memory bank 是 shared memory 内部的存储体。一个 warp 的 32 个 thread 如果访问分布在不同 bank 上的数据，硬件可以并行服务，速度快。如果多个 thread 同时访问同一个 bank 的不同地址，就可能发生 bank conflict，访问会被拆成多次执行。
+## 10 Concept Questions / 10 个概念问题
 
-### 2. 为什么 shared memory 也可能变慢
+### 1. What is a shared-memory bank? / 什么是 shared memory bank
 
-**Question:** 为什么 shared memory 虽然很快，但仍然可能因为访问模式变慢？请尽量使用 `warp`、`bank`、`bank conflict`、`并行访问`。
+**Question (English):** Why is shared memory split into banks, and when do a
+warp's accesses run in parallel or conflict?
 
-**Explanation:** shared memory 的速度优势依赖于访问能否被多个 bank 并行服务。
+**问题（中文）：** shared memory 为什么分成多个 bank？一个 warp 的访问何时能
+并行，何时可能冲突？
 
-**Correct Answer:** 一个 warp 中的多个 thread 同时访问 shared memory 时，如果它们访问不同 bank，通常可以并行访问。如果多个 thread 访问同一个 bank 的不同地址，就会发生 bank conflict，硬件需要串行化或拆分访问，因此变慢。
+**Explanation (English):** Shared memory is divided into independently
+serviceable channels called banks, or “存储体”.
 
-### 3. 连续 float 访问为什么理想
+**解说（中文）：** shared memory 内部不是单通道整体，而是分成多个可并行访问的
+bank，中文可理解为“存储体”。
 
-**Question:** 假设 shared memory 有 32 个 bank，`float` 是 4 bytes。下面这种访问通常为什么比较理想？
+**Correct Answer (English):** If a warp's 32 threads access data distributed
+across different banks, the accesses can be served in parallel. If multiple
+threads access different addresses in one bank, the operation may be split
+into multiple transactions, creating a bank conflict.
 
-```cpp
+**正确答案（中文）：** 一个 warp 的 32 个 thread 如果访问分布在不同 bank 的
+数据，硬件可并行服务；多个 thread 同时访问同一 bank 的不同地址时，访问可能被
+拆分，产生 bank conflict。
+
+### 2. Why shared memory can still be slow / Shared memory 为何仍可能变慢
+
+**Question (English):** Explain using `warp`, `bank`, parallel access, and
+bank conflict.
+
+**问题（中文）：** 请使用 `warp`、`bank`、并行访问和 bank conflict 解释
+shared memory 为何也可能变慢。
+
+**Explanation (English):** Shared memory's speed depends on whether its banks
+can serve the warp in parallel.
+
+**解说（中文）：** shared memory 的速度优势依赖访问能否由多个 bank 并行服务。
+
+**Correct Answer (English):** Different-bank accesses can proceed in parallel.
+Different addresses in one bank conflict and require serialization or split
+transactions, reducing performance.
+
+**正确答案（中文）：** 一个 warp 的 thread 访问不同 bank 时通常可并行；访问
+同一 bank 的不同地址时会发生冲突，需要串行化或拆分，因此变慢。
+
+### 3. Why contiguous float access is ideal / 连续 float 访问为何理想
+
+**Question (English):** Assuming 32 banks and four-byte floats, why is this
+pattern normally efficient?
+
+**问题（中文）：** 假设有 32 个 bank 且 `float` 为 4 bytes，为什么下面访问
+通常理想？
+
+~~~cpp
 __shared__ float s[32];
 
 int tid = threadIdx.x;
 float x = s[tid];
-```
+~~~
 
-**Explanation:** 常见情况下，连续的 `float` 元素会按顺序映射到不同 bank。
+**Explanation (English):** Consecutive float elements commonly map to
+consecutive banks.
 
-**Correct Answer:** 一个 warp 有 32 个 thread，`thread 0` 到 `thread 31` 分别访问 `s[0]` 到 `s[31]`。这些连续地址通常映射到 bank 0 到 bank 31，因此可以并行访问，通常不会产生 bank conflict。
+**解说（中文）：** 常见情况下，连续 `float` 元素会依次映射到不同 bank。
 
-### 4. stride 32 为什么容易冲突
+**Correct Answer (English):** Threads 0–31 read `s[0]`–`s[31]`, which
+normally map to banks 0–31 and can be served in parallel without a conflict.
 
-**Question:** 下面这个访问模式为什么容易产生 bank conflict？
+**正确答案（中文）：** thread 0–31 分别访问 `s[0]`–`s[31]`，通常映射到
+bank 0–31，因此可并行访问，通常没有 bank conflict。
 
-```cpp
+### 4. Why stride 32 conflicts / Stride 32 为何容易冲突
+
+**Question (English):** Why does this pattern create a severe conflict under
+the simplified rule `bank_id = index % 32`?
+
+**问题（中文）：** 按简化规则 `bank_id = index % 32`，为什么下面访问容易产生
+严重冲突？
+
+~~~cpp
 __shared__ float s[32 * 32];
 
 int tid = threadIdx.x;
 float x = s[tid * 32];
-```
+~~~
 
-**Explanation:** 对 `float` 数组可以用简化规则 `bank_id = index % 32` 理解 bank 映射。
+**Explanation (English):** The index stride equals the number of banks.
 
-**Correct Answer:** `thread 0` 访问 `s[0]`，`thread 1` 访问 `s[32]`，`thread 2` 访问 `s[64]`。这些 index 对 32 取模都等于 0，所以 32 个 thread 都访问 bank 0 的不同地址，容易产生严重 bank conflict。
+**解说（中文）：** 访问 index 的 stride 正好等于 bank 数量。
 
-### 5. stride 33 为什么减少冲突
+**Correct Answer (English):** Threads access indices 0, 32, 64, and so on.
+Every index modulo 32 is zero, so all threads target different addresses in
+bank 0.
 
-**Question:** 如果把访问改成下面这样，为什么冲突会明显减少？
+**正确答案（中文）：** thread 访问 `s[0]`、`s[32]`、`s[64]` 等 index，它们
+对 32 取模都为 0，因此都落到 bank 0 的不同地址。
 
-```cpp
+### 5. Why stride 33 reduces conflicts / Stride 33 为何减少冲突
+
+**Question (English):** Why does changing the stride to 33 help?
+
+**问题（中文）：** 为什么把 stride 改成 33 会明显减少冲突？
+
+~~~cpp
 __shared__ float s[32 * 33];
 
 int tid = threadIdx.x;
 float x = s[tid * 33];
-```
+~~~
 
-**Explanation:** stride 从 32 改为 33 后，bank 映射会和 32 个 bank 错开。
+**Explanation (English):** A stride of 33 rotates the mapping across 32 banks.
 
-**Correct Answer:** `thread 0` 访问 `s[0]`，映射到 bank 0；`thread 1` 访问 `s[33]`，映射到 bank 1；`thread 2` 访问 `s[66]`，映射到 bank 2。一个 warp 的 32 个 thread 会分散到 bank 0 到 bank 31，因此冲突明显减少。
+**解说（中文）：** stride 从 32 改为 33 后，bank 映射会与 32 个 bank 错开。
 
-### 6. `tile[32][33]` 的意义
+**Correct Answer (English):** Indices 0, 33, 66, and so on map to banks 0, 1,
+2, and so on. The warp's accesses spread across all banks.
 
-**Question:** 为什么 matrix transpose 里经常看到这种写法？
+**正确答案（中文）：** index 0、33、66 等分别映射到 bank 0、1、2 等，一个
+warp 的访问会分散到全部 bank。
 
-```cpp
+### 6. Meaning of tile[32][33] / tile[32][33] 的意义
+
+**Question (English):** What problem does the extra column avoid compared with
+`tile[32][32]`?
+
+**问题（中文）：** 与 `tile[32][32]` 相比，额外一列主要避免什么问题？
+
+~~~cpp
 __shared__ float tile[32][33];
-```
+~~~
 
-它和下面这种写法相比，主要是在避免什么问题？
+**Explanation (English):** This is padding: one extra element per row changes
+the stride of a column access.
 
-```cpp
-__shared__ float tile[32][32];
-```
+**解说（中文）：** 这是 padding 技巧，每行多一个元素，用来改变按列访问的
+stride。
 
-**Explanation:** `tile[32][33]` 是 padding 技巧，每行多 1 个元素，用来改变按列访问时的 stride。
+**Correct Answer (English):** A 32-float row makes column access stride by 32
+and repeatedly hit one bank. A 33-float row changes the stride to 33, rotating
+the bank mapping and reducing conflicts.
 
-**Correct Answer:** `tile[32][32]` 每行正好 32 个 `float`，按列访问时相邻 thread 的地址间隔是 32，容易落到同一个 bank。`tile[32][33]` 每行多 1 个 padding 元素，按列访问时 stride 变成 33，bank 映射会错开，从而减少 bank conflict。
+**正确答案（中文）：** `tile[32][32]` 按列访问时 stride 为 32，容易落在同一
+bank；`tile[32][33]` 每行 padding 一个元素，使 stride 变成 33，bank 映射
+错开，从而减少冲突。
 
-### 7. row-major 下哪个访问更容易冲突
+### 7. Row-major access comparison / Row-major 访问比较
 
-**Question:** 下面两种 shared memory 访问，哪个更容易 bank conflict？为什么？
+**Question (English):** Which access is more conflict-prone for
+`float tile[32][32]`, and why?
 
-```cpp
+**问题（中文）：** 对 `float tile[32][32]`，下面哪个访问更容易冲突？为什么？
+
+~~~cpp
 // A
 float x = tile[threadIdx.x][0];
 
 // B
 float x = tile[0][threadIdx.x];
-```
+~~~
 
-假设：
+**Explanation (English):** In row-major layout, `tile[row][col]` has linear
+index `row * 32 + col`.
 
-```cpp
-__shared__ float tile[32][32];
-```
+**解说（中文）：** row-major 布局中，`tile[row][col]` 的线性 index 是
+`row * 32 + col`。
 
-**Explanation:** CUDA C/C++ 二维数组通常是 row-major，`tile[row][col]` 的线性 index 是 `row * 32 + col`。
+**Correct Answer (English):** A. Its index is `tid * 32` and repeatedly maps
+to one bank. B accesses a contiguous row and normally spreads across banks
+0–31.
 
-**Correct Answer:** A 更容易 bank conflict。`tile[threadIdx.x][0]` 的 index 是 `tid * 32`，stride 是 32，容易全部映射到同一个 bank。B 是连续访问 `tile[0][0..31]`，通常分散到 bank 0 到 bank 31。
+**正确答案（中文）：** A 更容易冲突。它的 index 是 `tid * 32`，容易全部映射
+到同一 bank；B 连续访问一行，通常分散到 bank 0–31。
 
-### 8. `tile[32][33]` 如何改善按列访问
+### 8. How padding improves column access / Padding 如何改善按列访问
 
-**Question:** 如果把声明改成：
+**Question (English):** Explain why this access improves with
+`tile[32][33]`:
 
-```cpp
-__shared__ float tile[32][33];
-```
+**问题（中文）：** 请解释为什么改为 `tile[32][33]` 后，下面访问会好很多：
 
-那么下面这个访问为什么会比刚才好很多？
-
-```cpp
+~~~cpp
 float x = tile[threadIdx.x][0];
-```
+~~~
 
-请从线性 index 公式解释：
-
-```text
+~~~text
 index = row * 33 + col
 bank_id = index % 32
-```
+~~~
 
-**Explanation:** padding 让相邻行的同一列不再相隔 32 个 `float`，而是相隔 33 个 `float`。
+**Explanation (English):** The same column in neighboring rows is now 33
+floats apart instead of 32.
 
-**Correct Answer:** 对 `tile[threadIdx.x][0]`，`row 0` 的 index 是 0，映射到 bank 0；`row 1` 的 index 是 33，映射到 bank 1；`row 2` 的 index 是 66，映射到 bank 2。一个 warp 的访问会分散到不同 bank，因此比 `tile[32][32]` 更少冲突。
+**解说（中文）：** 相邻行同一列不再相隔 32 个 `float`，而是 33 个。
 
-### 9. padding 的代价
+**Correct Answer (English):** Rows 0, 1, and 2 produce indices 0, 33, and 66,
+which map to banks 0, 1, and 2. The warp spreads its accesses across banks.
 
-**Question:** padding 虽然能减少 bank conflict，但它有没有代价？比如 `tile[32][32]` 和 `tile[32][33]` 相比，后者多用了什么资源？这种代价通常大不大？什么时候可能需要注意？
+**正确答案（中文）：** row 0、1、2 的 index 分别为 0、33、66，对应 bank 0、
+1、2；一个 warp 的访问因此分散到不同 bank。
 
-**Explanation:** padding 是用额外 shared memory 换取更好的访问模式。
+### 9. Cost of padding / Padding 的代价
 
-**Correct Answer:** `tile[32][33]` 每行多 1 个 `float`，总共多 32 个 `float`。这些元素通常是 padding，不存真正的矩阵数据。代价是多占用一点 shared memory，通常不大；但如果 kernel shared memory 用量本来就很高，可能降低 occupancy。
+**Question (English):** What resource does `tile[32][33]` consume compared
+with `tile[32][32]`, and when can that matter?
 
-### 10. 今日核心直觉
+**问题（中文）：** 与 `tile[32][32]` 相比，`tile[32][33]` 多使用什么资源？
+什么时候需要注意？
 
-**Question:** 为什么 shared memory bank conflict 会让程序变慢？为什么 padding 可以缓解它？请尽量使用 `warp`、`bank` / `存储体`、`stride`、`padding`、`并行访问`。
+**Explanation (English):** Padding trades a small amount of extra shared
+memory for a better access pattern.
 
-**Explanation:** bank conflict 的本质是一个 warp 的访问没有被很好地分散到多个 bank。
+**解说（中文）：** padding 用额外 shared memory 换取更好的访问模式。
 
-**Correct Answer:** 一个 warp 内多个 thread 如果因为 stride 访问落到同一个 bank 的不同地址，硬件通常需要串行化或拆分访问，无法充分并行访问，所以程序变慢。padding 可以改变 stride，让访问分散到不同 bank，从而缓解 bank conflict。
+**Correct Answer (English):** It adds one float per row, or 32 floats total.
+The cost is normally small, but in a kernel already using substantial shared
+memory it can reduce occupancy.
 
-## 今日总结
+**正确答案（中文）：** 每行多一个 `float`，总共多 32 个。代价通常很小，但
+kernel 的 shared memory 用量本来很高时，可能降低 occupancy。
 
-今天已经理解：
+### 10. Core intuition / 核心直觉
 
-- `warp` 通常是 32 个 thread 的硬件执行单位
-- `bank` 可以翻译为 shared memory 的“存储体”
-- shared memory 被分成多个 bank，是为了支持并行访问
-- 连续访问 `s[threadIdx.x]` 通常会分散到不同 bank
-- `s[threadIdx.x * 32]` 这种 stride 32 访问容易让所有 thread 撞到同一个 bank
-- `tile[32][33]` 是 padding 技巧，用额外 shared memory 改变 stride
-- 在 row-major 布局里，`tile[row][col]` 的线性 index 可以按 `row * width + col` 理解
-- matrix transpose 常用 padding 避免按列访问 shared memory 时的 bank conflict
+**Question (English):** Why do bank conflicts slow a warp, and how does
+padding help?
 
-## 易错点
+**问题（中文）：** 为什么 bank conflict 会让 warp 变慢？padding 如何缓解？
 
-- 不是“访问同一个 bank”一定冲突；如果访问同一个 bank 的同一个地址，可能 broadcast。
-- `tile[32][33]` 不是只多 1 个元素，而是每行多 1 个，总共多 32 个 `float`。
-- padding 有代价，会多占 shared memory；通常很小，但 shared memory 用量很高时可能影响 occupancy。
+**Explanation (English):** A conflict means the warp's accesses were not
+distributed effectively across independent banks.
 
-## 下一步
+**解说（中文）：** bank conflict 的本质是一个 warp 的访问没有良好分散到多个
+bank。
 
-- 写一个 matrix transpose naive vs shared memory padding 版本
-- 对比 `tile[32][32]` 和 `tile[32][33]` 的性能差异
-- 用 profiler 观察 shared memory bank conflict 相关指标
+**Correct Answer (English):** A stride can map many threads to different
+addresses in one bank, forcing split or serialized service. Padding changes
+the stride so accesses spread across banks and regain parallelism.
+
+**正确答案（中文）：** stride 可能让多个 thread 落到同一 bank 的不同地址，
+迫使访问拆分或串行化；padding 改变 stride，让访问分散到多个 bank 并恢复并行。
+
+## Summary / 今日总结
+
+- **English:** A warp normally contains 32 threads, and shared memory is
+  divided into banks for parallel service.
+  **中文：** warp 通常包含 32 个 thread，shared memory 被划分成多个 bank 以
+  支持并行访问。
+- **English:** Contiguous float access usually spreads across banks; stride 32
+  tends to collapse onto one bank.
+  **中文：** 连续 float 访问通常分散到各 bank；stride 32 容易集中到一个 bank。
+- **English:** Row-major indexing explains why column access creates a
+  problematic stride.
+  **中文：** row-major 索引解释了按列访问为何产生问题 stride。
+- **English:** `tile[32][33]` adds padding to rotate the bank mapping.
+  **中文：** `tile[32][33]` 通过 padding 旋转 bank 映射。
+
+## Common Mistakes / 易错点
+
+- **English:** Assuming every same-bank access conflicts; reading the same
+  address may be broadcast.
+  **中文：** 误以为访问同一 bank 一定冲突；访问同一地址时可能 broadcast。
+- **English:** Saying `tile[32][33]` adds only one float rather than one per
+  row.
+  **中文：** 误以为 `tile[32][33]` 只多一个元素，而不是每行多一个。
+- **English:** Treating padding as free even when shared-memory pressure is
+  high.
+  **中文：** 在 shared-memory 压力很高时仍把 padding 当作无成本优化。
+
+## Next Steps / 下一步
+
+- **English:** Implement naive, unpadded shared, and padded shared matrix
+  transpose variants.
+  **中文：** 实现 naive、无 padding shared、padding shared 三种 transpose。
+- **English:** Compare performance and inspect bank-conflict metrics with a
+  profiler.
+  **中文：** 对比性能，并用 profiler 观察 bank-conflict 指标。

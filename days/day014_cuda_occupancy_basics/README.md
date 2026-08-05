@@ -1,145 +1,285 @@
-# Day 014: CUDA Occupancy Basics
+# Day 014: CUDA Occupancy Basics / CUDA Occupancy 基础
 
-Date: 2026-07-06
+Date / 日期: 2026-07-06
 
-## Topic
+## Topic / 主题
 
-CUDA occupancy, SM resource limits, and warp latency hiding.
+**English:** CUDA occupancy, SM resource limits, resident blocks and warps,
+register/shared-memory pressure, and warp-level latency hiding.
 
-## Goal
+**中文：** CUDA occupancy、SM 资源限制、驻留 block/warp、register/shared
+memory 压力，以及 warp 级延迟隐藏。
 
-Understand how resident warps, registers, shared memory, and block scheduling affect occupancy and why higher occupancy is useful but not always sufficient for higher performance.
+## Goal / 目标
 
-## 10 Concept Questions
+**English:** Understand how block scheduling and finite SM resources determine
+occupancy, why more resident warps can hide latency, and why maximum occupancy
+does not guarantee maximum performance.
 
-### 1. SM and block scheduling
+**中文：** 理解 block 调度与有限 SM 资源如何决定 occupancy，更多驻留 warp
+为何能隐藏延迟，以及最高 occupancy 为何不保证最高性能。
 
-**Question:** In CUDA, what is an SM? After launching a kernel with many blocks, do all blocks run at once, or are they scheduled in batches onto SMs?
+## 10 Concept Questions / 10 个概念问题
 
-**Explanation:** An SM is a Streaming Multiprocessor. A GPU has multiple SMs, and blocks are scheduled onto SMs as execution resources become available.
+### 1. SM and block scheduling / SM 与 block 调度
 
-**Correct Answer:** Blocks are scheduled in batches onto SMs. A block is assigned to one SM, and the SM executes its warps internally.
+**Question (English):** What is an SM? Do all launched blocks run at once?
 
-### 2. Occupancy definition
+**问题（中文）：** 什么是 SM？kernel 启动很多 block 后，它们会同时执行吗？
 
-**Question:** What is CUDA occupancy? Intuitively, what resource usage on an SM does it describe?
+**Explanation (English):** An SM is a Streaming Multiprocessor. Blocks are
+assigned to available SM execution resources.
 
-**Explanation:** Occupancy describes how many active warps are resident on an SM compared with the architecture's maximum resident warp capacity.
+**解说（中文）：** SM 是 Streaming Multiprocessor。GPU 有多个 SM，block 会在
+资源可用时被调度到 SM。
 
-**Correct Answer:** Occupancy is usually:
+**Correct Answer (English):** Blocks run in batches as capacity becomes
+available. Each block is assigned to one SM, which executes the block's warps.
 
-```text
+**正确答案（中文）：** block 会分批调度到 SM。一个 block 被分配给一个 SM，
+由该 SM 执行其内部 warps。
+
+### 2. Occupancy definition / Occupancy 定义
+
+**Question (English):** What does occupancy describe?
+
+**问题（中文）：** CUDA occupancy 描述什么资源使用情况？
+
+**Explanation (English):** It compares active resident warps with the
+architecture's maximum resident-warp capacity.
+
+**解说（中文）：** occupancy 比较 SM 上活跃驻留 warp 与架构最大驻留 warp
+容量。
+
+**Correct Answer (English):**
+
+**正确答案（中文）：**
+
+~~~text
 occupancy = active warps per SM / maximum resident warps per SM
-```
+~~~
 
-It describes how many warps are available on an SM to help hide latency.
+**English:** It describes how many warps are available to help hide latency.
 
-### 3. Can a block span multiple SMs?
+**中文：** 它描述 SM 上有多少 warp 可用于隐藏延迟。
 
-**Question:** Can one block be split across multiple SMs? For example, can part of a 256-thread block run on SM0 and the rest on SM1?
+### 3. Can a block span SMs? / 一个 block 能否跨 SM
 
-**Explanation:** A block is the basic unit of SM scheduling and resource allocation.
+**Question (English):** Can parts of one 256-thread block run on different
+SMs?
 
-**Correct Answer:** No. One block is assigned to one SM. Its threads, warps, shared memory, and register allocation belong to that SM. This is what makes block-level synchronization and shared memory possible.
+**问题（中文）：** 一个 256-thread block 能否一部分运行在 SM0、另一部分运行在
+SM1？
 
-### 4. Warps per block and resident blocks
+**Explanation (English):** A block is the unit of SM scheduling and resource
+allocation.
 
-**Question:** Suppose one SM can have at most 64 resident warps. If a kernel uses 256 threads per block, how many warps does each block have? From the warp limit alone, how many such blocks can one SM hold?
+**解说（中文）：** block 是 SM 调度与资源分配的基本单位。
 
-**Explanation:** One warp usually contains 32 threads.
+**Correct Answer (English):** No. One block and all its threads, warps,
+register allocation, and shared memory belong to one SM. This enables
+block-level barriers and shared memory.
 
-**Correct Answer:**
+**正确答案（中文）：** 不能。一个 block 的 thread、warp、register 分配与
+shared memory 都属于一个 SM，这也是 block 内同步与共享内存成立的基础。
 
-```text
+### 4. Warps per block and resident blocks / 每 block warp 数与驻留 block
+
+**Question (English):** If an SM supports at most 64 resident warps, how many
+warps are in a 256-thread block and how many such blocks fit by the warp limit
+alone?
+
+**问题（中文）：** SM 最多驻留 64 个 warp 时，256-thread block 有多少 warp？
+仅考虑 warp 限制，一个 SM 最多放多少个这种 block？
+
+**Explanation (English):** One warp normally contains 32 threads.
+
+**解说（中文）：** 一个 warp 通常包含 32 个 thread。
+
+**Correct Answer (English):**
+
+**正确答案（中文）：**
+
+~~~text
 warps per block = 256 / 32 = 8
 max blocks from warp limit = 64 / 8 = 8
-```
+~~~
 
-From the warp limit alone, one SM can hold at most 8 such blocks.
+**English:** The warp limit alone permits at most eight blocks.
 
-### 5. Resources that limit resident blocks
+**中文：** 仅按 warp 限制，一个 SM 最多驻留 8 个这样的 block。
 
-**Question:** Besides the maximum resident warp count, what resources can limit how many blocks can reside on one SM? Name at least two.
+### 5. Other residency limits / 其他驻留限制
 
-**Explanation:** Occupancy is constrained by several hardware limits at the same time.
+**Question (English):** Name at least two resources besides resident-warps
+that can limit blocks per SM.
 
-**Correct Answer:** Common limits include:
+**问题（中文）：** 除最大驻留 warp 数外，至少说出两个限制每 SM 驻留 block 数
+的资源。
 
-- maximum resident blocks per SM
-- maximum resident warps per SM
-- registers per SM
-- shared memory per SM
-- threads per block
+**Explanation (English):** Several hardware limits constrain residency
+simultaneously.
 
-### 6. Register usage and occupancy
+**解说（中文）：** 多项硬件上限会同时约束 occupancy。
 
-**Question:** If each thread in a kernel uses many registers, how does that affect occupancy? Why does a per-thread resource affect whether a whole block can reside on an SM?
+**Correct Answer (English):**
 
-**Explanation:** Registers are private to each thread, but a block's total register usage is the sum of all its threads' register requirements.
+**正确答案（中文）：**
 
-**Correct Answer:**
+- **English:** Maximum resident blocks and warps per SM.
+  **中文：** 每 SM 最大驻留 block 数与 warp 数。
+- **English:** Registers and shared memory per SM.
+  **中文：** 每 SM 的 register 与 shared memory。
+- **English:** Threads per block and other architecture limits.
+  **中文：** 每 block thread 数以及其他架构限制。
 
-```text
+### 6. Register pressure / Register 使用与 occupancy
+
+**Question (English):** Why can high register use per thread lower occupancy?
+
+**问题（中文）：** 为什么每 thread 使用很多 register 会降低 occupancy？
+
+**Explanation (English):** A block's register demand accumulates across all
+its threads.
+
+**解说（中文）：** register 虽然是 per-thread 资源，但 block 总需求是所有 thread
+需求之和。
+
+**Correct Answer (English):**
+
+**正确答案（中文）：**
+
+~~~text
 block register usage = registers per thread * threads per block
-```
+~~~
 
-If each thread uses many registers, each block consumes more of the SM's register file. When the SM cannot fit more blocks because registers are exhausted, resident blocks and active warps decrease, so occupancy can decrease.
+**English:** Large blocks with high per-thread use can exhaust the SM register
+file, reducing resident blocks and active warps.
 
-### 7. Shared memory usage and occupancy
+**中文：** 每 thread 用量高时，一个 block 消耗更多 SM register file，可能减少
+驻留 block 与活跃 warp。
 
-**Question:** If each block uses a lot of shared memory, how does that affect occupancy? How is this similar to and different from register limits?
+### 7. Shared-memory pressure / Shared memory 使用与 occupancy
 
-**Explanation:** Shared memory is a limited per-SM resource. Each resident block reserves its own shared memory allocation.
+**Question (English):** How does large shared-memory use per block affect
+occupancy, and how does it differ from register pressure?
 
-**Correct Answer:** More shared memory per block can reduce the number of blocks that fit on an SM.
+**问题（中文）：** 每 block 使用大量 shared memory 如何影响 occupancy？它与
+register 限制有何异同？
 
-Registers and shared memory are similar because both are finite SM resources and both can limit resident blocks. They differ because registers are usually allocated per thread and then accumulate into a block-level total, while shared memory is allocated per block and shared by threads in that block.
+**Explanation (English):** Every resident block reserves part of the finite
+shared memory on its SM.
 
-### 8. Is higher occupancy always better?
+**解说（中文）：** shared memory 是有限的 per-SM 资源，每个驻留 block 都保留
+自己的份额。
 
-**Question:** Is occupancy always better when it is higher? If occupancy increases from 50% to 100%, must performance improve?
+**Correct Answer (English):** More shared memory per block allows fewer blocks
+to fit. Both registers and shared memory limit residency; registers are
+normally allocated per thread and accumulate, while shared memory is allocated
+per block and shared within it.
 
-**Explanation:** Occupancy is a means to expose enough ready warps, not a direct performance guarantee.
+**正确答案（中文）：** 每 block 用量越大，SM 能容纳的 block 越少。两者都是有限
+SM 资源；register 通常按 thread 分配后累积为 block 总量，shared memory 则按
+block 分配并在 block 内共享。
 
-**Correct Answer:** No. Higher occupancy can help when the kernel needs more warps to hide latency, but performance may not improve if the bottleneck is elsewhere. Chasing higher occupancy can also hurt performance if it causes register spilling, smaller shared-memory tiles, worse memory access patterns, or poor block-size choices.
+### 8. Is higher occupancy always better? / Occupancy 越高是否一定越好
 
-### 9. Occupancy and global memory latency
+**Question (English):** Must performance improve when occupancy rises from
+50% to 100%?
 
-**Question:** If a kernel is global-memory-latency-bound, why can higher occupancy help? Explain using "warp waiting for memory" and "switching to another warp."
+**问题（中文）：** occupancy 从 50% 提升到 100% 时，性能一定提高吗？
 
-**Explanation:** When one warp waits for a global memory load, the SM can issue instructions from another ready warp instead of idling.
+**Explanation (English):** Occupancy exposes ready warps; it is not a direct
+performance guarantee.
 
-**Correct Answer:** Higher occupancy gives the SM more active warps. When some warps wait for global memory, the SM has a better chance of finding another ready warp to execute. This hides memory latency and can improve utilization.
+**解说（中文）：** occupancy 的作用是提供足够 ready warp，而不是直接保证性能。
 
-### 10. Putting the concepts together
+**Correct Answer (English):** No. More warps help only when latency hiding is
+needed. Chasing occupancy can cause register spilling, smaller tiles, worse
+memory access, or poor block sizes while another bottleneck remains.
 
-**Question:** Summarize the relationship between occupancy, registers, shared memory, and warp latency hiding.
+**正确答案（中文）：** 不一定。更多 warp 只在需要隐藏延迟时有帮助。盲目追求
+occupancy 可能导致 register spilling、更小 tile、更差访问模式或不良 block
+size，而真正瓶颈仍在别处。
 
-**Explanation:** Occupancy is shaped by resource limits, and its value comes from giving the SM enough runnable warps.
+### 9. Occupancy and memory latency / Occupancy 与 global memory 延迟
 
-**Correct Answer:** Registers and shared memory limit how many blocks and warps can reside on an SM. Occupancy measures active warps per SM relative to the hardware maximum. More active warps can help the SM switch to other ready warps when some warps wait for memory or instruction results, which hides latency. However, high occupancy does not guarantee high performance.
+**Question (English):** Why can higher occupancy help a
+global-memory-latency-bound kernel?
 
-## Summary
+**问题（中文）：** 为什么更高 occupancy 可能帮助受 global memory latency
+限制的 kernel？
 
-Today covered:
+**Explanation (English):** While one warp waits for a load, an SM can issue
+instructions from another ready warp.
 
-- SMs as the hardware units that receive and execute blocks
-- block scheduling onto SMs in batches
-- block residency and why one block cannot span multiple SMs
-- occupancy as active warps per SM relative to the maximum resident warps per SM
-- register usage as a per-thread resource that accumulates into block-level pressure
-- shared memory usage as a per-block resource that can limit resident blocks
-- why high occupancy helps hide latency
-- why maximum occupancy is not always the fastest configuration
+**解说（中文）：** 一个 warp 等待 global memory load 时，SM 可以执行另一个
+ready warp。
 
-## Common Mistakes
+**Correct Answer (English):** More active warps increase the chance that some
+warp is ready when others wait, hiding memory latency and improving SM
+utilization.
 
-- Saying "stream multiprocessors" instead of the more precise "Streaming Multiprocessor."
-- Treating the occupancy denominator as the current number of warps on an SM instead of the architecture's maximum resident warps per SM.
-- Confusing maximum resident warp count with maximum resident block count.
-- Thinking warps do not wait for memory; they can wait, and the SM hides that wait by scheduling other ready warps.
-- Assuming higher occupancy always guarantees higher throughput.
+**正确答案（中文）：** 更多活跃 warp 提高了在部分 warp 等待时找到 ready warp
+的机会，从而隐藏延迟并提高 SM 利用率。
 
-## Next Step
+### 10. Putting the model together / 综合关系
 
-Study CUDA block-size selection and occupancy calculator intuition: why block sizes such as 128, 256, and 512 are common, and how register usage, shared memory usage, and warp count shape occupancy.
+**Question (English):** Summarize occupancy, register/shared-memory limits,
+and warp latency hiding.
+
+**问题（中文）：** 总结 occupancy、register/shared-memory 限制与 warp 延迟
+隐藏的关系。
+
+**Explanation (English):** Resource limits determine residency; residency is
+useful because it exposes runnable warps.
+
+**解说（中文）：** 资源限制决定驻留量；驻留量的价值在于提供可运行 warp。
+
+**Correct Answer (English):** Registers and shared memory limit resident
+blocks and warps. Occupancy compares active warps with the architecture
+maximum. More active warps can hide waits by switching to ready work, but high
+occupancy alone does not guarantee high performance.
+
+**正确答案（中文）：** register 与 shared memory 限制驻留 block/warp。
+occupancy 比较活跃 warp 与硬件最大值。更多 warp 可在等待时切换到 ready work
+来隐藏延迟，但高 occupancy 本身不保证高性能。
+
+## Summary / 总结
+
+- **English:** SMs receive blocks in batches, and one block never spans SMs.
+  **中文：** SM 分批接收 block，一个 block 不会跨 SM。
+- **English:** Occupancy measures active resident warps relative to the
+  architecture maximum.
+  **中文：** occupancy 衡量活跃驻留 warp 相对架构最大值的比例。
+- **English:** Per-thread registers and per-block shared memory both constrain
+  residency.
+  **中文：** per-thread register 与 per-block shared memory 都约束驻留量。
+- **English:** Ready warps hide latency, but maximum occupancy is not always
+  the fastest configuration.
+  **中文：** ready warp 能隐藏延迟，但最高 occupancy 不一定最快。
+
+## Common Mistakes / 常见错误
+
+- **English:** Calling an SM a “stream multiprocessor” instead of Streaming
+  Multiprocessor.
+  **中文：** 把 SM 说成 stream multiprocessor，而不是 Streaming
+  Multiprocessor。
+- **English:** Using current warp count rather than architectural maximum as
+  the occupancy denominator.
+  **中文：** 把当前 warp 数而不是架构最大驻留 warp 数作为分母。
+- **English:** Confusing maximum resident warp and block counts.
+  **中文：** 混淆最大驻留 warp 数与 block 数。
+- **English:** Assuming warps never wait for memory.
+  **中文：** 误以为 warp 不会等待 memory。
+- **English:** Assuming higher occupancy guarantees higher throughput.
+  **中文：** 误以为更高 occupancy 保证更高 throughput。
+
+## Next Step / 下一步
+
+**English:** Study block-size selection and occupancy-calculator intuition:
+how block sizes such as 128, 256, and 512 interact with registers, shared
+memory, and warp count.
+
+**中文：** 学习 block-size 选择与 occupancy calculator 直觉：128、256、512
+等 block size 如何与 register、shared memory 和 warp 数共同决定 occupancy。

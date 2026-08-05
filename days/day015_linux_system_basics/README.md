@@ -1,135 +1,302 @@
-# Day 015: Linux System Basics
+# Day 015: Linux System Basics / Linux 系统基础
 
-Date: 2026-07-07
+Date / 日期: 2026-07-07
 
-## Topic
+## Topic / 主题
 
-Linux system fundamentals: user space, kernel space, system calls, processes, virtual memory, file descriptors, pipes, fork/exec, and signals.
+**English:** User/kernel space, system calls, processes and threads, virtual
+memory, file descriptors, pipes, `fork/exec`, signals, swap, `mmap`, and the
+MMU.
 
-## Goal
+**中文：** 用户态/内核态、系统调用、进程与线程、虚拟内存、文件描述符、管道、
+`fork/exec`、信号、swap、`mmap` 与 MMU。
 
-Build a coherent mental model of how Linux separates user programs from kernel-managed resources, and how processes use system calls and file descriptors to interact with files, pipes, sockets, memory, and other programs.
+## Goal / 目标
 
-## 10 Concept Questions
+**English:** Build a coherent model of how Linux separates applications from
+kernel-managed resources and how processes interact with files, pipes,
+sockets, memory, and other programs.
 
-### 1. Kernel space and user space
+**中文：** 建立 Linux 如何隔离应用与内核资源的连贯模型，并理解进程如何通过
+系统调用和文件描述符使用文件、管道、socket、内存与其他程序。
 
-**Question:** In Linux, what are kernel space and user space? Why are they separated?
+## 10 Concept Questions / 10 个概念问题
 
-**Explanation:** Kernel space is the privileged address space where the kernel runs and manages CPU, memory, disks, network devices, and other hardware resources. User space is where normal applications run without direct hardware access.
+### 1. Kernel space and user space / 内核态与用户态
 
-**Correct Answer:** User programs run in user space and must use system calls to request privileged operations from the kernel. This separation improves safety and stability because ordinary programs cannot freely read kernel memory, control hardware directly, or crash the whole system as easily.
+**Question (English):** What are kernel space and user space, and why are they
+separated?
 
-### 2. System calls
+**问题（中文）：** 什么是 kernel space 和 user space？为什么要把它们隔离？
 
-**Question:** What is a system call? If a user program wants to read a file, why can it not directly read from disk?
+**Explanation (English):** The kernel manages hardware and privileged state;
+ordinary applications run without direct unrestricted access.
 
-**Explanation:** A system call is a controlled entry point from user space into kernel space.
+**解说（中文）：** 内核管理 CPU、内存、磁盘、网络设备等特权资源，普通应用不能
+不受限制地直接访问。
 
-**Correct Answer:** A program uses system calls such as `read()`, `write()`, `open()`, `fork()`, and `mmap()` to ask the kernel to perform privileged operations. For file reading, the kernel checks the file descriptor, permissions, page cache, and disk I/O state, then safely copies data back to user space.
+**Correct Answer (English):** Applications run in user space and use system
+calls for privileged operations. Separation improves safety and stability by
+preventing ordinary programs from freely reading kernel memory, controlling
+hardware, or easily crashing the whole system.
 
-### 3. Process and thread
+**正确答案（中文）：** 应用运行在用户态，通过系统调用请求内核执行特权操作。
+隔离能防止普通程序随意读取内核内存、控制硬件或轻易破坏整个系统，从而提高安全
+与稳定性。
 
-**Question:** What is the difference between a Linux process and a thread? Answer from the angles of resource ownership and execution scheduling.
+### 2. System calls / 系统调用
 
-**Explanation:** A process is mainly a resource isolation unit. A thread is an execution flow that usually shares resources with other threads in the same process.
+**Question (English):** What is a system call, and why can an application not
+read a disk directly?
 
-**Correct Answer:** A process has its own virtual address space, file descriptor table, signal state, credentials, and other resource views. Threads in the same process share much of that state, including address space, heap, global variables, and open files. Linux schedules executable tasks; processes and threads are both represented as schedulable tasks with different degrees of resource sharing.
+**问题（中文）：** 什么是系统调用？用户程序为什么不能直接从磁盘读取文件？
 
-### 4. Virtual memory
+**Explanation (English):** A system call is a controlled transition from user
+space into kernel space.
 
-**Question:** What is virtual memory? Why does each process feel like it owns a large continuous memory region even though physical memory may not be continuous?
+**解说（中文）：** 系统调用是从用户态进入内核态的受控入口。
 
-**Explanation:** Each process sees its own virtual address space. The kernel and MMU map virtual addresses to physical memory pages.
+**Correct Answer (English):** Calls such as `read()`, `write()`, `open()`,
+`fork()`, and `mmap()` ask the kernel to perform privileged work. For a read,
+the kernel checks descriptors, permissions, page cache, and I/O state before
+returning data safely.
 
-**Correct Answer:** Virtual memory is the combination of a per-process virtual address space and address translation through page tables. Different processes can use the same virtual address values while mapping to different physical pages. Virtual memory provides isolation, supports non-contiguous physical allocation, and enables demand paging, shared libraries, `mmap()`, and swap.
+**正确答案（中文）：** 程序通过 `read()`、`write()`、`open()`、`fork()`、
+`mmap()` 等请求内核执行特权操作。读取文件时，内核检查文件描述符、权限、page
+cache 与 I/O 状态，再安全地返回数据。
 
-### 5. File descriptors
+### 3. Process and thread / 进程与线程
 
-**Question:** What is a file descriptor in Linux? Why can programs often use `read()` and `write()` uniformly for files, sockets, and pipes?
+**Question (English):** How do processes and threads differ in resource
+ownership and scheduling?
 
-**Explanation:** A file descriptor is a small integer in a process that refers to an open file object managed by the kernel.
+**问题（中文）：** 从资源所有权与执行调度角度看，进程和线程有何区别？
 
-**Correct Answer:** File descriptors such as `0`, `1`, `2`, and later integers point to kernel-side open file objects. The object may represent a regular file, socket, pipe, terminal, or device. User programs pass the fd to system calls, while the kernel dispatches the actual operation based on the underlying object type.
+**Explanation (English):** A process is primarily a resource-isolation unit;
+a thread is an execution flow sharing much of its process state.
 
-### 6. Pipes
+**解说（中文）：** 进程主要是资源隔离单位；线程是通常与同进程其他线程共享资源
+的执行流。
 
-**Question:** What is a Linux pipe? Why can a shell command such as `cat file.txt | grep error` connect one command's output to another command's input?
+**Correct Answer (English):** A process has a virtual address space, file
+descriptor table, credentials, and other resource views. Threads in one
+process share address space, heap, globals, and open files. Linux schedules
+tasks representing both, with different degrees of sharing.
 
-**Explanation:** A pipe is a kernel buffer with a write end and a read end.
+**正确答案（中文）：** 进程拥有虚拟地址空间、文件描述符表、凭据等资源视图。
+同进程线程共享地址空间、heap、全局变量和打开文件。Linux 把两者都表示为可调度
+task，但资源共享程度不同。
 
-**Correct Answer:** The shell creates a pipe, starts `cat` with its `stdout` connected to the pipe's write end, and starts `grep` with its `stdin` connected to the pipe's read end. Data written by `cat` flows through the kernel pipe buffer and is read by `grep`. Both processes can run concurrently.
+### 4. Virtual memory / 虚拟内存
 
-### 7. `fork()`
+**Question (English):** Why does each process see a large contiguous address
+space even when physical memory is not contiguous?
 
-**Question:** What is `fork()`? After `fork()`, what is the relationship between the parent process and child process? Is memory copied immediately?
+**问题（中文）：** 物理内存不连续时，为什么每个进程仍感觉拥有很大的连续地址
+空间？
 
-**Explanation:** `fork()` creates a child process from the current process.
+**Explanation (English):** The kernel and MMU translate per-process virtual
+addresses through page tables.
 
-**Correct Answer:** After `fork()`, the parent receives the child's pid and the child receives `0`. Both continue from the same program location after the call. Modern Linux usually uses copy-on-write, so physical memory pages are not immediately fully copied. Pages are shared read-only until one process writes to a page, at which point the kernel copies that page. A child can outlive its parent; the parent is usually responsible for calling `wait()` or `waitpid()` to reap the child's exit status.
+**解说（中文）：** 每个进程看到自己的虚拟地址空间，内核与 MMU 通过页表把虚拟
+地址映射到物理页。
 
-### 8. `exec()`
+**Correct Answer (English):** Virtual memory combines per-process address
+spaces with address translation. Identical virtual addresses in different
+processes can map to different pages. It provides isolation, non-contiguous
+allocation, demand paging, shared libraries, `mmap()`, and swap.
 
-**Question:** What does the `exec()` family of system calls do? How does it usually work with `fork()` to start a new program?
+**正确答案（中文）：** 虚拟内存由每进程虚拟地址空间与页表转换组成。不同进程的
+相同虚拟地址可映射到不同物理页。它支持隔离、非连续物理分配、按需分页、共享库、
+`mmap()` 和 swap。
 
-**Explanation:** `exec()` replaces the current process image with a new program.
+### 5. File descriptors / 文件描述符
 
-**Correct Answer:** `exec()` does not create a new process by itself. If successful, it keeps the process identity such as the pid but replaces the current code, data, heap, stack, and entry point with the new program. A shell commonly calls `fork()` to create a child process, then the child calls `exec()` to run the requested command, while the parent may call `wait()`.
+**Question (English):** What is a file descriptor, and why do `read()` and
+`write()` work uniformly for files, sockets, and pipes?
 
-### 9. Signals
+**问题（中文）：** 什么是文件描述符？为什么 `read()` 和 `write()` 能统一
+操作文件、socket 与 pipe？
 
-**Question:** What is a Linux signal? What signal does `Ctrl+C` usually send to the foreground process, and what can happen after a process receives it?
+**Explanation (English):** A descriptor is a small process-local integer
+referring to a kernel-managed open file object.
 
-**Explanation:** A signal is an asynchronous notification delivered to a process.
+**解说（中文）：** 文件描述符是进程中的小整数，指向内核管理的打开文件对象。
 
-**Correct Answer:** Signals can be sent by the kernel, terminal, user commands, or other processes. `Ctrl+C` usually sends `SIGINT` to the foreground process group, whose default action is termination. Different signals have different default actions; some can be caught or ignored, while `SIGKILL` cannot be caught or ignored. Examples include `SIGTERM`, `SIGKILL`, and `SIGSEGV`.
+**Correct Answer (English):** Descriptors such as 0, 1, and 2 can refer to
+regular files, sockets, pipes, terminals, or devices. Applications pass the
+fd to system calls, and the kernel dispatches based on the underlying object.
 
-### 10. Connecting the concepts
+**正确答案（中文）：** 0、1、2 等 fd 可指向普通文件、socket、pipe、terminal
+或 device。程序把 fd 传给系统调用，内核再根据底层对象类型分派操作。
 
-**Question:** Summarize the relationship between user space, system calls, process, file descriptor, and fork/exec.
+### 6. Pipes / 管道
 
-**Explanation:** These concepts form the core path from user programs to kernel-managed resources and program execution.
+**Question (English):** How does `cat file.txt | grep error` connect two
+programs?
 
-**Correct Answer:** User programs run in user space. When they need files, network, memory mapping, or process management, they use system calls to enter the kernel. The kernel manages execution and isolation through processes and tasks. A process accesses files, sockets, pipes, terminals, and devices through file descriptors. A shell commonly starts commands by using `fork()` to create a child process and `exec()` in the child to replace it with the target program.
+**问题（中文）：** `cat file.txt | grep error` 如何连接两个程序？
 
-## Extra Concepts
+**Explanation (English):** A pipe is a kernel buffer with a read end and a
+write end.
 
-### Swap
+**解说（中文）：** pipe 是具有读端和写端的内核缓冲区。
 
-`swap` is disk-backed space used as a fallback for memory pages. When RAM is under pressure, Linux can move less-used pages from memory to swap, then bring them back when accessed later. Heavy swap usage is much slower than RAM and can make the system feel slow.
+**Correct Answer (English):** The shell connects `cat` stdout to the write
+end and `grep` stdin to the read end. Data streams through the kernel buffer
+while both processes can run concurrently.
 
-### `mmap()`
+**正确答案（中文）：** shell 把 `cat` 的 stdout 连接到写端，把 `grep` 的
+stdin 连接到读端。数据通过内核缓冲区流动，两个进程可以并发运行。
 
-`mmap()` maps a file or anonymous memory region into a process's virtual address space. Programs can then access the mapped region like memory. It is commonly used for large files, shared memory, dynamic libraries, and large anonymous allocations.
+### 7. fork / fork
 
-### MMU
+**Question (English):** What relationship does `fork()` create, and is all
+memory copied immediately?
 
-The MMU, or Memory Management Unit, is hardware that translates virtual addresses to physical addresses using page tables maintained by the kernel. If a mapping is missing or violates permissions, the CPU raises a page fault and the kernel handles it.
+**问题（中文）：** `fork()` 创建怎样的父子关系？内存会立即完整复制吗？
 
-## Summary
+**Explanation (English):** `fork()` creates a child process from the current
+one.
 
-Today covered:
+**解说（中文）：** `fork()` 从当前进程创建子进程。
 
-- kernel space and user space separation
-- system calls as controlled entries into the kernel
-- processes as resource isolation units and threads as shared-resource execution flows
-- virtual memory and address translation
-- swap, `mmap()`, and the MMU
-- file descriptors as a unified I/O abstraction
-- pipes as kernel buffers connecting processes
-- `fork()` and copy-on-write
-- `exec()` as process image replacement
-- signals as asynchronous process notifications
-- how shell command execution combines `fork()`, `exec()`, file descriptors, pipes, and `wait()`
+**Correct Answer (English):** The parent receives the child's PID and the
+child receives zero; both continue after the call. Modern Linux uses
+copy-on-write, sharing pages until either writes. A child can outlive its
+parent, and a parent normally uses `wait()`/`waitpid()` to reap it.
 
-## Common Mistakes
+**正确答案（中文）：** parent 收到 child PID，child 收到 0，两者从调用后继续。
+现代 Linux 使用 copy-on-write，写入前共享物理页。child 可以比 parent 活得久，
+parent 通常用 `wait()`/`waitpid()` 回收退出状态。
 
-- Treating a process as a hardware resource scheduling unit instead of primarily a resource isolation unit.
-- Thinking a child process must die when its parent exits; a child can outlive its parent and be adopted by `init` or `systemd`.
-- Thinking `exec()` creates a new process; it replaces the current process image.
-- Thinking every signal forcibly stops a program; many signals can be handled or ignored, depending on the signal.
-- Treating a file descriptor as the file itself rather than a process-local handle to a kernel object.
+### 8. exec / exec
 
-## Next Step
+**Question (English):** What does the `exec()` family do, and how does a shell
+combine it with `fork()`?
 
-Study the Linux process lifecycle and shell execution model in more detail: `fork`, `exec`, `wait`, zombie processes, orphan processes, stdin/stdout redirection, and pipe pipelines.
+**问题（中文）：** `exec()` 系列做什么？shell 如何把它与 `fork()` 组合？
+
+**Explanation (English):** `exec()` replaces the current process image.
+
+**解说（中文）：** `exec()` 替换当前进程映像。
+
+**Correct Answer (English):** It does not create a process. On success it
+keeps identity such as PID but replaces code, data, heap, stack, and entry
+point. A shell forks a child, the child execs the command, and the parent may
+wait.
+
+**正确答案（中文）：** 它本身不创建进程。成功时保留 PID 等身份，但替换 code、
+data、heap、stack 与入口。shell 通常 fork child，让 child exec 目标命令，
+parent 再 wait。
+
+### 9. Signals / 信号
+
+**Question (English):** What is a signal, what does Ctrl+C normally send, and
+what can a process do after receiving one?
+
+**问题（中文）：** 什么是 signal？Ctrl+C 通常发送什么？进程收到后会怎样？
+
+**Explanation (English):** A signal is an asynchronous process notification.
+
+**解说（中文）：** signal 是发送给进程的异步通知。
+
+**Correct Answer (English):** Ctrl+C normally sends `SIGINT` to the foreground
+process group, whose default action is termination. Signals have different
+defaults; some can be handled or ignored, while `SIGKILL` cannot. Other
+examples include `SIGTERM` and `SIGSEGV`.
+
+**正确答案（中文）：** Ctrl+C 通常向前台进程组发送 `SIGINT`，默认动作是终止。
+不同信号有不同默认动作；一些可捕获或忽略，`SIGKILL` 不行。其他例子包括
+`SIGTERM` 与 `SIGSEGV`。
+
+### 10. Connecting the concepts / 串联概念
+
+**Question (English):** Relate user space, system calls, processes, file
+descriptors, and `fork/exec`.
+
+**问题（中文）：** 总结 user space、系统调用、进程、文件描述符与
+`fork/exec` 的关系。
+
+**Explanation (English):** Together they describe the path from applications
+to kernel-managed resources and program execution.
+
+**解说（中文）：** 这些概念构成用户程序访问内核资源与启动程序的核心路径。
+
+**Correct Answer (English):** Applications run in user space and use system
+calls to request kernel services. Processes provide execution and isolation;
+file descriptors name open kernel objects. A shell forks a child and execs
+the requested program, wiring descriptors and optionally waiting.
+
+**正确答案（中文）：** 应用在用户态运行，通过系统调用请求内核服务。进程提供
+执行和隔离，文件描述符指向打开的内核对象。shell fork child 并 exec 目标程序，
+同时连接 fd，并可选择 wait。
+
+## Extra Concepts / 补充概念
+
+### Swap / Swap
+
+**English:** Swap is disk-backed fallback space for memory pages. Under RAM
+pressure, Linux can move less-used pages out and later restore them. Heavy
+swap use is much slower than RAM and can make the system unresponsive.
+
+**中文：** swap 是磁盘支持的内存页后备空间。RAM 紧张时，Linux 可把较少使用的
+页面移出并在之后恢复。大量 swap 远慢于 RAM，会让系统明显变慢。
+
+### mmap / mmap
+
+**English:** `mmap()` maps a file or anonymous region into a process's virtual
+address space so it can be accessed like memory. It is common for large files,
+shared memory, dynamic libraries, and large anonymous allocations.
+
+**中文：** `mmap()` 把文件或匿名区域映射到进程虚拟地址空间，使其可像内存一样
+访问。它常用于大文件、共享内存、动态库与大型匿名分配。
+
+### MMU / MMU
+
+**English:** The Memory Management Unit translates virtual addresses through
+kernel-maintained page tables. Missing or disallowed mappings raise a page
+fault for the kernel to handle.
+
+**中文：** MMU 使用内核维护的页表转换虚拟地址。映射缺失或违反权限时，CPU 触发
+page fault，由内核处理。
+
+## Summary / 总结
+
+- **English:** User/kernel separation and system calls protect privileged
+  resources.
+  **中文：** 用户态/内核态隔离与系统调用保护特权资源。
+- **English:** Processes isolate resources; threads share much of their
+  process state.
+  **中文：** 进程隔离资源；线程共享同进程的大量状态。
+- **English:** Virtual memory and the MMU translate isolated address spaces.
+  **中文：** 虚拟内存与 MMU 转换隔离的地址空间。
+- **English:** File descriptors unify access to files, sockets, pipes,
+  terminals, and devices.
+  **中文：** 文件描述符统一表示文件、socket、pipe、terminal 与 device。
+- **English:** Shell execution composes `fork`, `exec`, descriptors, pipes,
+  signals, and `wait`.
+  **中文：** shell 执行组合 `fork`、`exec`、fd、pipe、signal 与 `wait`。
+
+## Common Mistakes / 常见错误
+
+- **English:** Treating a process primarily as a hardware scheduling unit
+  rather than a resource-isolation unit.
+  **中文：** 把进程主要看作硬件调度单位，而不是资源隔离单位。
+- **English:** Assuming a child must die when its parent exits.
+  **中文：** 误以为 parent 退出后 child 必须终止。
+- **English:** Assuming `exec()` creates a new process.
+  **中文：** 误以为 `exec()` 创建新进程。
+- **English:** Assuming every signal forcibly terminates a program.
+  **中文：** 误以为所有 signal 都强制终止程序。
+- **English:** Treating a file descriptor as the file itself rather than a
+  process-local handle.
+  **中文：** 把文件描述符当成文件本身，而不是进程本地句柄。
+
+## Next Step / 下一步
+
+**English:** Study process lifecycle and shell execution in more detail:
+`fork`, `exec`, `wait`, zombies, orphans, redirection, and pipelines.
+
+**中文：** 深入学习进程生命周期与 shell 执行：`fork`、`exec`、`wait`、
+zombie、orphan、重定向和 pipeline。

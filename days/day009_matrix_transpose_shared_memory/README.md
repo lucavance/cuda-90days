@@ -1,157 +1,223 @@
-# Day 009: Matrix Transpose Shared Memory
+# Day 009: Matrix Transpose with Shared Memory / 使用 Shared Memory 的矩阵转置
 
-Date: 2026-06-15
+Date / 日期: 2026-06-15
 
-## 今日目标
+## Topic / 主题
 
-今天把 Day 006 的 shared memory 和 Day 008 的 bank conflict 概念落到一个可运行实验中：实现 matrix transpose 的 naive 版本、shared memory `32x32` 版本、shared memory `32x33` padding 版本，并为后续 benchmark / profiling 做准备。
+**English:** A runnable matrix-transpose experiment comparing a naive kernel,
+an unpadded `32x32` shared-memory tile, and a padded `32x33` tile.
 
-## 实验位置
+**中文：** 可运行的 matrix transpose 实验，对比 naive kernel、无 padding 的
+`32x32` shared-memory tile，以及带 padding 的 `32x33` tile。
 
-```text
+## Goal / 目标
+
+**English:** Apply the shared-memory and bank-conflict concepts from Days 006
+and 008 to real kernels, with correctness checking and benchmark scaffolding.
+
+**中文：** 把 Day 006 的 shared memory 与 Day 008 的 bank conflict 概念落到
+真实 kernel 中，并加入 correctness check 与 benchmark 框架。
+
+## Experiment Location / 实验位置
+
+~~~text
 kernels/cuda_cpp/matrix_transpose/
 ├── CMakeLists.txt
 ├── .gitignore
 ├── .vscode/
 └── transpose_bench.cu
-```
+~~~
 
-## Kernel 版本
+## Kernel Variants / Kernel 版本
 
-### 1. `transpose_naive`
+### 1. transpose_naive / transpose_naive
 
-直接从 global memory 读取：
+**English:** The naive kernel reads directly from global memory:
 
-```cpp
+**中文：** naive kernel 直接从 global memory 读取：
+
+~~~cpp
 out[x * height + y] = in[y * width + x];
-```
+~~~
 
-这个版本逻辑最简单，但 transpose 的读写方向会导致其中一侧 global memory 访问不连续，通常性能较差。
+**English:** It is simple, but swapping read/write orientation makes one side
+of the transpose non-contiguous and normally reduces performance.
 
-### 2. `transpose_shared_32x32`
+**中文：** 逻辑最简单，但 transpose 交换读写方向后，其中一侧 global memory
+访问会不连续，通常性能较差。
 
-使用 shared memory tile：
+### 2. transpose_shared_32x32 / transpose_shared_32x32
 
-```cpp
+**English:** This version stages a tile in shared memory:
+
+**中文：** 这个版本把一个 tile 暂存到 shared memory：
+
+~~~cpp
 __shared__ float tile[32][32];
-```
+~~~
 
-思路是先把一块连续数据读入 shared memory，再交换 block 坐标写回 global memory，从而改善 global memory 访问模式。
+**English:** It reads a contiguous tile, swaps block coordinates, and writes
+the transposed tile back, improving the global-memory access pattern. However,
+`tile[threadIdx.x][threadIdx.y + j]` becomes a stride-32 shared-memory
+access in row-major layout and can create bank conflicts.
 
-这个版本的问题是：按列读取 shared memory 时，`tile[threadIdx.x][threadIdx.y + j]` 在 row-major 布局下可能出现 stride 32 访问，容易产生 shared memory bank conflict。
+**中文：** 它连续读入 tile，交换 block 坐标后写回，从而改善 global memory
+访问模式。但在 row-major 布局中，
+`tile[threadIdx.x][threadIdx.y + j]` 会形成 stride-32 shared-memory 访问，
+容易产生 bank conflict。
 
-### 3. `transpose_shared_32x33`
+### 3. transpose_shared_32x33 / transpose_shared_32x33
 
-使用 padding：
+**English:** The padded version declares:
 
-```cpp
+**中文：** padding 版本声明：
+
+~~~cpp
 __shared__ float tile[32][33];
-```
+~~~
 
-每行多 1 个 padding 元素，让按列访问的 stride 从 32 变成 33。按照简化映射：
+**English:** One extra element per row changes the column stride from 32 to
+33. Under the simplified mapping below, a stride of 33 distributes a warp's
+accesses across banks:
 
-```text
+**中文：** 每行多一个 padding 元素，把按列访问的 stride 从 32 改为 33。按下面
+的简化映射，stride 33 会把一个 warp 的访问分散到不同 bank：
+
+~~~text
 bank_id = index % 32
-```
+~~~
 
-stride 33 会让一个 warp 的访问分散到不同 bank，从而减少 bank conflict。
+## Build / 构建
 
-## 构建命令
-
-```bash
+~~~bash
 cd kernels/cuda_cpp/matrix_transpose
 cmake -S . -B build -G Ninja
 cmake --build build
-```
+~~~
 
-当前环境编译结果：
+**English:** The current environment produced:
 
-```text
+**中文：** 当前环境的构建输出为：
+
+~~~text
 cmake --build build
 # nvcc -O3 -std=c++23 -arch=native ...
 # nvcc warning : Cannot find valid GPU for '-arch=native', default arch is used
-```
+~~~
 
-结论：代码可以通过 `nvcc` 编译。
+**English:** The source compiles successfully with `nvcc`.
 
-## 运行命令
+**中文：** 源码可以通过 `nvcc` 编译。
 
-```bash
+## Run / 运行
+
+~~~bash
 cd kernels/cuda_cpp/matrix_transpose
 cmake --build build --target run
 # 或
 ./build/matrix_transpose 50
-```
+~~~
 
-当前环境运行结果：
+**English:** The current environment reported:
 
-```text
+**中文：** 当前环境的运行结果为：
+
+~~~text
 CUDA error transpose_bench.cu:210: no CUDA-capable device is detected
-```
+~~~
 
-结论：当前 shell 环境没有检测到可用 CUDA GPU，因此今天没有产生真实性能数据。
+**English:** No CUDA-capable GPU was visible from this shell, so the session
+did not produce real performance measurements.
 
-## Benchmark 设计
+**中文：** 当前 shell 未检测到可用 CUDA GPU，因此本次没有产生真实性能数据。
 
-程序默认测试：
+## Benchmark Design / Benchmark 设计
 
-```text
+**English:** The program tests these matrix sizes by default:
+
+**中文：** 程序默认测试以下矩阵尺寸：
+
+~~~text
 1024 x 1024
 2048 x 2048
 4096 x 4096
-```
+~~~
 
-每个 kernel 输出：
+**English:** Each kernel reports:
 
-```text
+**中文：** 每个 kernel 输出：
+
+~~~text
 kernel
 avg_ms
 GB/s
 correct
-```
+~~~
 
-带宽估算使用：
+**English:** Effective bandwidth assumes one read and one write per element:
 
-```text
+**中文：** 有效带宽按每个元素至少读一次、写一次计算：
+
+~~~text
 effective_bandwidth = 2 * matrix_bytes / elapsed_time
-```
+~~~
 
-因为 transpose 每个元素至少读一次、写一次。
+## Correctness Design / Correctness 设计
 
-## Correctness 设计
+**English:** A CPU reference computes:
 
-程序会在 host 侧计算 CPU reference：
+**中文：** CPU reference 计算：
 
-```cpp
+~~~cpp
 out[x * height + y] = in[y * width + x];
-```
+~~~
 
-每个 CUDA kernel 运行后把结果拷回 host，逐元素与 CPU reference 对比。任何 mismatch 都会打印位置和数值，并让程序失败退出。
+**English:** Every CUDA result is copied back and compared element by element.
+A mismatch prints its location and values and terminates the program.
 
-## 今日理解
+**中文：** 每个 CUDA 结果都会拷回 Host 并逐元素比较。任何 mismatch 都会打印
+位置和数值并让程序失败退出。
 
-- matrix transpose 是观察 global memory coalescing、shared memory tile、bank conflict 的经典实验。
-- naive transpose 容易因为读写方向交换，让 global memory 的一侧访问不连续。
-- shared memory tile 可以把 global memory 的读写组织得更连续。
-- `tile[32][32]` 虽然用了 shared memory，但按列访问 tile 时容易出现 stride 32 的 bank conflict。
-- `tile[32][33]` 通过 padding 改变 stride，减少 shared memory bank conflict。
-- correctness check 和 benchmark 应该放进同一个最小可运行程序，避免只写 kernel 没有验证。
+## Understanding / 今日理解
 
-## 待补 benchmark
+- **English:** Matrix transpose is a classic experiment for global-memory
+  coalescing, shared-memory tiling, and bank conflicts.
+  **中文：** matrix transpose 是观察 global-memory coalescing、shared-memory
+  tile 和 bank conflict 的经典实验。
+- **English:** A direct transpose normally makes either its reads or writes
+  non-contiguous.
+  **中文：** 直接 transpose 通常会让读写中的一侧不连续。
+- **English:** A shared tile reorganizes global reads and writes into more
+  contiguous patterns.
+  **中文：** shared tile 能把 global 读写组织得更连续。
+- **English:** `tile[32][32]` can conflict during column access; padding to
+  `tile[32][33]` changes the stride and reduces that conflict.
+  **中文：** `tile[32][32]` 按列访问时可能冲突；padding 到
+  `tile[32][33]` 会改变 stride 并减少冲突。
+- **English:** Correctness and timing belong in the same minimal runnable
+  experiment.
+  **中文：** correctness check 与 benchmark 应放进同一个最小可运行实验。
 
-在有 CUDA GPU 的环境上运行：
+## Pending Benchmark / 待补 benchmark
 
-```bash
+**English:** On a machine with a visible CUDA GPU, run:
+
+**中文：** 在可见 CUDA GPU 的环境中运行：
+
+~~~bash
 cd kernels/cuda_cpp/matrix_transpose
 rm -rf build
 cmake -S . -B build -G Ninja
 cmake --build build
 ./build/matrix_transpose 100
-```
+~~~
 
-然后记录类似表格：
+**English:** Then fill in the real measurements without replacing the current
+`TBD` values with estimates:
 
-| Matrix | Kernel | avg_ms | GB/s | Correct |
+**中文：** 随后填写真实性能数据，不使用估算值替换当前 `TBD`：
+
+| Matrix / 矩阵 | Kernel | avg_ms | GB/s | Correct / 正确 |
 | --- | --- | ---: | ---: | --- |
 | 1024 x 1024 | naive | TBD | TBD | TBD |
 | 1024 x 1024 | shared_32x32 | TBD | TBD | TBD |
@@ -163,9 +229,13 @@ cmake --build build
 | 4096 x 4096 | shared_32x32 | TBD | TBD | TBD |
 | 4096 x 4096 | shared_32x33 | TBD | TBD | TBD |
 
-## 下一步
+## Next Steps / 下一步
 
-- 在有 GPU 的环境运行 benchmark，补全表格。
-- 用 Nsight Compute 观察 shared memory bank conflict 相关指标。
-- 继续实现 copy kernel，对比 transpose 和纯 copy 的有效带宽上限。
-- 后续尝试把同类实验迁移到 Rust / cuda-oxide。
+- **English:** Run the benchmark on a CUDA GPU and complete the table.
+  **中文：** 在 CUDA GPU 上运行 benchmark 并补全表格。
+- **English:** Use Nsight Compute to inspect bank-conflict metrics.
+  **中文：** 使用 Nsight Compute 观察 bank-conflict 指标。
+- **English:** Add a copy kernel to establish a bandwidth ceiling.
+  **中文：** 增加 copy kernel，对比 transpose 与纯 copy 的带宽上限。
+- **English:** Port the experiment to Rust/cuda-oxide later.
+  **中文：** 后续把实验迁移到 Rust/cuda-oxide。

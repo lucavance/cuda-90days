@@ -1,81 +1,164 @@
-# Day 005: Global Memory and Coalescing
+# Day 005: Global Memory and Coalescing / 全局内存与合并访问
 
-Date: 2026-06-10
+Date / 日期: 2026-06-10
 
-## 今日目标
+## Topic / 主题
 
-今天回到 CUDA 主线，学习 global memory 与 memory coalescing 的基础直觉。重点不是背硬件细节，而是理解为什么 GPU 喜欢相邻 thread 以规则、连续的方式访问 global memory。
+**English:** CUDA global memory, contiguous and strided access, memory
+coalescing, memory transactions, effective bandwidth, and bandwidth-bound
+kernels.
 
-## 10 个概念问题
+**中文：** CUDA global memory、连续与跨步访问、memory coalescing、memory
+transaction、有效带宽以及 memory bandwidth-bound kernel。
 
-### 1. global memory 是什么
+## Goal / 目标
 
-**Question:** 在 CUDA 里，`global memory` 通常指什么？请从 CPU/GPU 侧、是否属于显存、kernel thread 能否访问、host 普通指针能否直接使用这几个角度解释。
+**English:** Build the intuition that GPUs prefer neighboring threads to
+access global memory in regular, contiguous patterns, without memorizing
+low-level hardware details yet.
 
-**Explanation:** CUDA 中的 host memory 和 device global memory 是两个不同的内存空间。理解它们的位置和访问权限，是后续理解性能的前提。
+**中文：** 暂不背诵底层硬件细节，先建立 GPU 喜欢相邻 thread 以规则、连续方式
+访问 global memory 的基础直觉。
 
-**Correct Answer:** `global memory` 通常指 GPU device 侧的全局内存，通常是显存的一部分。kernel 里的 thread 可以访问 global memory。host 端普通指针不能直接当作 global memory 指针使用；通过 `cudaMalloc` 得到的 `d_a` 这类 device pointer 才指向 device global memory。
+## 10 Concept Questions / 10 个概念问题
 
-### 2. 为什么要拷贝到 global memory
+### 1. What is global memory? / 什么是 global memory
 
-**Question:** 为什么 CUDA 程序里经常要这样做？
+**Question (English):** In CUDA, what does `global memory` normally mean?
+Explain its CPU/GPU location, relation to VRAM, kernel accessibility, and
+whether an ordinary host pointer can address it.
 
-```cpp
+**问题（中文）：** 在 CUDA 中，`global memory` 通常指什么？请从 CPU/GPU
+位置、是否属于显存、kernel thread 能否访问，以及 Host 普通指针能否直接使用
+几个角度解释。
+
+**Explanation (English):** Host memory and device global memory are distinct
+address spaces. Their placement and access rules are prerequisites for
+reasoning about performance.
+
+**解说（中文）：** Host memory 与 Device global memory 是不同的内存空间。
+理解它们的位置和访问权限，是后续理解性能的前提。
+
+**Correct Answer (English):** Global memory normally means device-wide GPU
+memory, usually backed by VRAM. Kernel threads can access it. An ordinary host
+pointer is not a global-memory pointer; a device pointer such as `d_a`
+returned by `cudaMalloc` refers to device global memory.
+
+**正确答案（中文）：** global memory 通常指 GPU Device 侧的全局内存，一般是
+显存的一部分。kernel thread 可以访问它。Host 普通指针不能直接作为 global
+memory 指针；`cudaMalloc` 返回的 `d_a` 这类 Device pointer 才指向 Device
+global memory。
+
+### 2. Why copy data to global memory? / 为什么把数据拷到 global memory
+
+**Question (English):** Why is this allocation-and-copy sequence common?
+
+**问题（中文）：** 为什么 CUDA 程序经常执行下面的分配与拷贝？
+
+~~~cpp
 cudaMalloc(&d_a, size);
 cudaMemcpy(d_a, h_a, size, cudaMemcpyHostToDevice);
-```
+~~~
 
-请用 `host memory`、`global memory`、`kernel thread` 解释。
+**Explanation (English):** Input prepared by the CPU normally resides in host
+memory, while GPU threads need data in device global memory.
 
-**Explanation:** CPU 侧准备的数据通常在 host memory 中，而 GPU kernel thread 需要访问 device global memory。
+**解说（中文）：** CPU 准备的数据通常位于 Host memory，而 GPU kernel thread
+需要访问 Device global memory。
 
-**Correct Answer:** `cudaMalloc(&d_a, size)` 在 device global memory 中为 `d_a` 分配空间；`cudaMemcpyHostToDevice` 把 host memory 中的 `h_a` 数据拷贝到 device global memory 中的 `d_a`；kernel thread 随后读写 `d_a` 对应的显存数据。
+**Correct Answer (English):** `cudaMalloc` allocates space for `d_a` in
+device global memory. `cudaMemcpyHostToDevice` copies `h_a` from host memory
+into that allocation, after which kernel threads can read or write it.
 
-### 3. global memory 为什么慢
+**正确答案（中文）：** `cudaMalloc(&d_a, size)` 在 Device global memory 中为
+`d_a` 分配空间；`cudaMemcpyHostToDevice` 把 Host memory 中的 `h_a` 拷贝到
+`d_a`，随后 kernel thread 才能读写对应显存数据。
 
-**Question:** 为什么说 global memory 访问通常比较“慢”？这里的“慢”主要是相对于哪些内存或存储位置而言？
+### 3. Why is global memory slow? / Global memory 为什么慢
 
-**Explanation:** GPU 内部有不同层级的存储。global memory 容量大，但访问延迟相对高。
+**Question (English):** Relative to which GPU storage locations is global
+memory considered slow?
 
-**Correct Answer:** global memory 通常比 register 和 shared memory 慢很多。大致直觉是：register 最快、thread 私有；shared memory 很快、block 内共享；global memory 容量大、所有 thread 可访问，但访问延迟高。
+**问题（中文）：** 为什么说 global memory 访问通常比较慢？这里的“慢”主要是
+相对于哪些存储位置？
 
-### 4. vector add 的连续访问
+**Explanation (English):** GPU storage is hierarchical. Global memory has
+large capacity but relatively high access latency.
 
-**Question:** 在 vector add 里，如果每个 thread 做：
+**解说（中文）：** GPU 内部有不同层级的存储。global memory 容量大，但访问
+延迟相对高。
 
-```cpp
+**Correct Answer (English):** Global memory is much slower than registers and
+shared memory. Registers are fastest and thread-private; shared memory is fast
+and block-shared; global memory is large and device-wide but has higher
+latency.
+
+**正确答案（中文）：** global memory 通常比 register 和 shared memory 慢。
+直觉上 register 最快且 thread 私有；shared memory 很快且 block 内共享；global
+memory 容量大、所有 thread 可访问，但延迟高。
+
+### 4. Contiguous access in vector add / Vector add 中的连续访问
+
+**Question (English):** What address pattern do neighboring threads normally
+produce in this vector-add kernel?
+
+**问题（中文）：** 在下面的 vector add 中，相邻 thread 通常访问怎样的地址？
+
+~~~cpp
 int idx = blockIdx.x * blockDim.x + threadIdx.x;
 c[idx] = a[idx] + b[idx];
-```
+~~~
 
-相邻 thread 通常会访问什么样的内存地址？
+**Explanation (English):** The one-dimensional global index grows
+consecutively with neighboring threads.
 
-**Explanation:** 一维 vector add 中，全局索引 `idx` 通常随 thread 连续增长。
+**解说（中文）：** 一维 vector add 中，全局索引 `idx` 通常随 thread 连续增长。
 
-**Correct Answer:** 通常是：
+**Correct Answer (English):**
 
-```text
+**正确答案（中文）：**
+
+~~~text
 thread 0 -> a[0]
 thread 1 -> a[1]
 thread 2 -> a[2]
 thread 3 -> a[3]
-```
+~~~
 
-也就是相邻 thread 访问相邻内存地址。这种模式对 GPU 友好，因为更容易产生 memory coalescing。
+**English:** Neighboring threads access neighboring addresses, which is
+favorable for coalescing.
 
-### 5. memory coalescing
+**中文：** 相邻 thread 访问相邻内存地址，这种模式更容易产生 coalescing。
 
-**Question:** `memory coalescing` 可以粗略理解成什么？为什么相邻 thread 访问相邻 global memory 地址通常更高效？
+### 5. Memory coalescing / 内存合并访问
 
-**Explanation:** GPU 会以 memory transaction 的形式访问 global memory。如果一组 thread 的访问整齐连续，硬件更容易把它们合并。
+**Question (English):** What is a useful high-level definition of memory
+coalescing, and why are adjacent addresses efficient?
 
-**Correct Answer:** `memory coalescing` 可以理解为 GPU 把同一组相邻 thread 对连续 global memory 地址的访问，合并成更少的 memory transaction。这样可以减少内存事务数量，提高有效带宽利用率，并减少等待 global memory 的时间。
+**问题（中文）：** 如何粗略理解 memory coalescing？为什么相邻 thread 访问
+相邻 global memory 地址通常更高效？
 
-### 6. 连续访问 vs 跨步访问
+**Explanation (English):** Global memory is serviced through memory
+transactions. Regular neighboring accesses are easier for hardware to combine.
 
-**Question:** 下面两种访问模式，哪一种更可能 coalescing 友好？
+**解说（中文）：** GPU 通过 memory transaction 访问 global memory。一组
+thread 的访问整齐连续时，硬件更容易合并请求。
 
-```cpp
+**Correct Answer (English):** Coalescing combines a group of neighboring
+threads' accesses to contiguous global-memory addresses into fewer memory
+transactions, improving effective bandwidth and reducing waiting.
+
+**正确答案（中文）：** memory coalescing 是把同一组相邻 thread 对连续 global
+memory 地址的访问合并成更少的 memory transaction，从而提高有效带宽并减少
+等待。
+
+### 6. Contiguous versus strided access / 连续访问与跨步访问
+
+**Question (English):** Which pattern is more coalescing-friendly?
+
+**问题（中文）：** 下面哪种访问模式更有利于 coalescing？
+
+~~~cpp
 // A
 int idx = blockIdx.x * blockDim.x + threadIdx.x;
 x = a[idx];
@@ -83,82 +166,147 @@ x = a[idx];
 // B
 int idx = blockIdx.x * blockDim.x + threadIdx.x;
 x = a[idx * 16];
-```
+~~~
 
-**Explanation:** 是否 coalescing 友好，关键看相邻 thread 是否访问相邻地址。
+**Explanation (English):** The key question is whether neighboring threads
+access neighboring addresses.
 
-**Correct Answer:** A 更 coalescing 友好。A 中相邻 thread 访问 `a[0]`、`a[1]`、`a[2]` 等连续地址；B 中相邻 thread 访问 `a[0]`、`a[16]`、`a[32]` 等跨步地址，硬件更难把访问合并成少量 memory transaction。
+**解说（中文）：** 是否有利于 coalescing，关键看相邻 thread 是否访问相邻地址。
 
-### 7. stride access 为什么慢
+**Correct Answer (English):** A. Its threads access `a[0]`, `a[1]`,
+`a[2]`, and so on. B accesses `a[0]`, `a[16]`, `a[32]`, and so on, making
+it harder to combine requests into a small number of transactions.
 
-**Question:** 为什么 `a[idx * 16]` 这种 stride access 可能会让 global memory 访问变慢？
+**正确答案（中文）：** A 更有利。A 中相邻 thread 访问连续地址；B 中相邻 thread
+访问 `a[0]`、`a[16]`、`a[32]` 等跨步地址，硬件更难用少量 memory
+transaction 合并访问。
 
-**Explanation:** `stride access` 可以理解为跨步访问或步长访问，也就是相邻访问之间有固定间隔，而不是连续访问。
+### 7. Why strided access is slower / 为什么 stride access 更慢
 
-**Correct Answer:** `a[idx * 16]` 会让相邻 thread 访问 `a[0]`、`a[16]`、`a[32]` 这类不相邻地址。硬件难以把这些访问合并成少量 memory transaction，可能需要更多内存事务，每次事务的有效数据利用率更低，因此 global memory bandwidth 利用率下降。
+**Question (English):** Why can `a[idx * 16]` reduce global-memory
+performance?
 
-### 8. vector add 为什么是 memory bandwidth-bound
+**问题（中文）：** 为什么 `a[idx * 16]` 这种 stride access 可能让 global
+memory 访问变慢？
 
-**Question:** 为什么 vector add 通常是一个 `memory bandwidth-bound` 的 kernel？
+**Explanation (English):** Strided access places a fixed gap between
+neighboring accesses instead of keeping them contiguous.
 
-```cpp
+**解说（中文）：** stride access 是跨步访问，相邻访问之间有固定间隔，而不是
+连续地址。
+
+**Correct Answer (English):** Neighboring threads touch far-apart addresses,
+which may require more memory transactions with less useful data in each.
+Effective global-memory bandwidth therefore falls.
+
+**正确答案（中文）：** 相邻 thread 访问不相邻地址，硬件可能需要更多 memory
+transaction，且每次事务的有效数据利用率更低，因此 global memory bandwidth
+利用率下降。
+
+### 8. Why vector add is bandwidth-bound / Vector add 为何受内存带宽限制
+
+**Question (English):** Why is this kernel normally memory bandwidth-bound?
+
+**问题（中文）：** 为什么下面的 vector add 通常是 memory bandwidth-bound
+kernel？
+
+~~~cpp
 c[idx] = a[idx] + b[idx];
-```
+~~~
 
-它的计算量和内存读写量哪个更突出？
+**Explanation (English):** A bottleneck depends on the ratio of computation
+to data movement.
 
-**Explanation:** 判断一个 kernel 的瓶颈时，要看它主要花时间在计算上，还是花在读写内存上。
+**解说（中文）：** 判断 kernel 瓶颈要看它主要花时间计算，还是读写内存。
 
-**Correct Answer:** vector add 每个元素通常只有 1 次加法，但需要读 `a[idx]`、读 `b[idx]`、写 `c[idx]`。计算量很少，global memory 读写量更突出，所以性能通常受限于 global memory bandwidth。
+**Correct Answer (English):** Each element needs only one addition but two
+global reads and one global write. Data movement dominates the small amount of
+arithmetic, so performance is usually limited by global-memory bandwidth.
 
-### 9. bandwidth-bound 的优化重点
+**正确答案（中文）：** 每个元素只有一次加法，却需要读 `a[idx]`、读
+`b[idx]`、写 `c[idx]`。内存读写相对更突出，所以性能通常受 global memory
+bandwidth 限制。
 
-**Question:** 如果一个 kernel 是 `memory bandwidth-bound`，优化重点应该更偏向哪一类？
+### 9. Optimization priority for bandwidth-bound kernels / 带宽受限 kernel 的优化重点
 
-```text
+**Question (English):** Which direction should be prioritized?
+
+**问题（中文）：** 如果 kernel 受 memory bandwidth 限制，应优先选择哪类优化？
+
+~~~text
 A. 减少不必要的 global memory 访问，提高 memory coalescing
 B. 增加更多复杂数学计算，让 GPU 更忙
-```
+~~~
 
-**Explanation:** 瓶颈在哪里，优化重点就应该优先放在哪里。vector add 这类简单 kernel 的瓶颈通常不是算力。
+**Explanation (English):** Optimization should target the current bottleneck;
+simple vector add is normally not compute-bound.
 
-**Correct Answer:** 选 A。对 memory bandwidth-bound kernel，优化重点通常是减少不必要的 global memory 访问，让访问更连续、更 coalesced，提高有效带宽利用率，并避免重复读写。
+**解说（中文）：** 瓶颈在哪里，优化重点就应放在哪里；简单 vector add 的瓶颈
+通常不是算力。
 
-### 10. 今天的核心直觉
+**Correct Answer (English):** A. Reduce unnecessary reads and writes, keep
+accesses contiguous and coalesced, improve effective bandwidth, and avoid
+repeated movement.
 
-**Question:** 用一句话总结：为什么 GPU 喜欢相邻 thread 访问相邻 global memory 地址？请尽量使用 `coalescing`、`memory transaction`、`bandwidth`、`global memory` 这些词。
+**正确答案（中文）：** 选 A。减少不必要的 global memory 访问，让访问更连续、
+更 coalesced，提高有效带宽并避免重复读写。
 
-**Explanation:** 这里的关键不是 global memory 使用量变少，也不是内存申请释放变少，而是 global memory 访问请求更容易被硬件合并。
+### 10. Core intuition / 核心直觉
 
-**Correct Answer:** GPU 喜欢相邻 thread 访问相邻 global memory 地址，因为这种模式更容易 coalescing，能减少 memory transaction 数量，提高 global memory bandwidth 利用率。
+**Question (English):** In one sentence, why do GPUs prefer neighboring
+threads to access neighboring global-memory addresses?
 
-## 今日总结
+**问题（中文）：** 用一句话总结：为什么 GPU 喜欢相邻 thread 访问相邻 global
+memory 地址？
 
-今天已经理解：
+**Explanation (English):** The benefit is not less allocation or necessarily
+less memory capacity; it is easier combination of access requests.
 
-- global memory 是 GPU device 侧的全局内存，通常是显存的一部分
-- `cudaMalloc` 分配的是 device global memory
-- host memory 中的数据要通过 `cudaMemcpyHostToDevice` 拷到 global memory
-- kernel thread 可以访问 global memory
-- global memory 比 register / shared memory 慢，但容量大
-- vector add 中相邻 thread 通常访问相邻数组元素
-- memory coalescing 是把相邻 thread 的连续访问合并成更少的 memory transaction
-- `a[idx]` 比 `a[idx * 16]` 更 coalescing-friendly
-- stride access 是跨步访问，会降低 coalescing 效果
-- vector add 通常是 memory bandwidth-bound
-- memory bandwidth-bound kernel 的优化重点是减少不必要 global memory 访问，提高 coalescing 和有效带宽
+**解说（中文）：** 关键不是减少 global memory 容量或 `cudaMalloc` 次数，而是
+让访问请求更容易被合并。
 
-## 易错点
+**Correct Answer (English):** The pattern coalesces into fewer memory
+transactions and therefore uses global-memory bandwidth more effectively.
 
-- global memory 在 GPU device 侧，不在 CPU 侧。
-- host 普通指针不能直接当作 device global memory 指针使用。
-- stride access 是跨步访问，不是连续访问。
-- coalescing 优化的是 memory transaction 和带宽利用率，不是减少 `cudaMalloc` / `cudaFree` 次数。
-- global memory 使用量不一定变少，但访问效率可以变高。
+**正确答案（中文）：** 这种模式更容易 coalescing，能减少 memory transaction
+数量，提高 global memory bandwidth 利用率。
 
-## 下一步
+## Summary / 今日总结
 
-- 对比连续访问和 stride access 的 benchmark
-- 记录不同 stride 下的 kernel time
-- 后续学习 shared memory 基础
-- 后续使用 Nsight Compute 观察 global memory load/store 指标
+- **English:** Global memory is large device-wide GPU memory, while registers
+  and shared memory are faster and smaller.
+  **中文：** global memory 是容量较大的 Device 全局内存；register 与 shared
+  memory 更快但更小。
+- **English:** Neighboring vector-add threads naturally access neighboring
+  elements.
+  **中文：** vector add 中相邻 thread 天然访问相邻元素。
+- **English:** Coalescing reduces memory transactions and improves effective
+  bandwidth.
+  **中文：** coalescing 减少 memory transaction 并提高有效带宽。
+- **English:** Strided access weakens coalescing.
+  **中文：** stride access 会削弱 coalescing。
+- **English:** Vector add is usually bandwidth-bound, so memory traffic is the
+  primary optimization target.
+  **中文：** vector add 通常受带宽限制，因此内存流量是主要优化目标。
+
+## Common Mistakes / 易错点
+
+- **English:** Locating device global memory on the CPU side.
+  **中文：** 误以为 Device global memory 位于 CPU 侧。
+- **English:** Treating an ordinary host pointer as a device pointer.
+  **中文：** 把普通 Host pointer 当作 Device pointer。
+- **English:** Calling strided access contiguous.
+  **中文：** 把跨步访问当作连续访问。
+- **English:** Believing coalescing reduces allocation count rather than
+  memory transactions.
+  **中文：** 误以为 coalescing 减少 `cudaMalloc` 次数，而不是 memory
+  transaction。
+
+## Next Steps / 下一步
+
+- **English:** Benchmark contiguous access against multiple strides.
+  **中文：** 对比连续访问与不同 stride 的 kernel time。
+- **English:** Learn shared-memory fundamentals and inspect global load/store
+  metrics with Nsight Compute.
+  **中文：** 学习 shared memory 基础，并用 Nsight Compute 观察 global
+  load/store 指标。

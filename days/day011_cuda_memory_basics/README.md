@@ -1,164 +1,279 @@
-# Day 011: CUDA Memory Basics
+# Day 011: CUDA Memory Basics / CUDA 内存基础
 
-Date: 2026-06-25
+Date / 日期: 2026-06-25
 
-## 今日目标
+## Topic / 主题
 
-通过 10 个交互式问答，理解 CUDA memory 的基础概念，重点区分 `host memory`、`device/global memory`、`shared memory` 和 `register` 的位置、访问范围、速度特点和典型用途。
+**English:** Host memory, device/global memory, shared memory, registers,
+pointer access rules, lifetimes, block communication, and synchronization.
 
-## 10 个概念问题
+**中文：** Host memory、Device/global memory、shared memory、register、指针
+访问规则、生命周期、block 通信与同步。
 
-### 1. host memory 和 device memory
+## Goal / 目标
 
-**Question:** 在 CUDA 程序里，`host memory` 和 `device memory` 分别指什么？为什么 CPU 上的普通数组通常不能直接给 GPU kernel 使用？
+**English:** Distinguish the location, visibility, speed, lifetime, and common
+uses of CUDA's main memory spaces.
 
-**Explanation:** CUDA 程序通常由 CPU 端准备数据、GPU 端执行 kernel。两端通常有不同的内存空间，需要显式拷贝数据。
+**中文：** 区分 CUDA 主要内存空间的位置、访问范围、速度、生命周期与典型用途。
 
-**Correct Answer:** `host memory` 是 CPU 侧内存，`device memory` 是 GPU 侧内存。CPU 普通数组位于 host memory 中，而 GPU kernel 通常访问 device memory，因此需要用 `cudaMemcpy` 把数据从 host memory 拷贝到 device memory。
+## 10 Concept Questions / 10 个概念问题
 
-### 2. cudaMalloc 分配出来的指针
+### 1. Host memory and device memory / Host memory 与 Device memory
 
-**Question:** `cudaMalloc(&d_a, size)` 分配出来的 `d_a` 在哪里？CPU 代码和 GPU kernel 分别如何使用这个指针？
+**Question (English):** What does each term mean, and why can a GPU kernel not
+normally consume an ordinary CPU array directly?
 
-**Explanation:** CPU 代码可以持有 device pointer 的指针值，但不能像普通 host pointer 一样直接解引用它。
+**问题（中文）：** 两种内存分别是什么？为什么 GPU kernel 通常不能直接使用
+CPU 普通数组？
 
-**Correct Answer:** `d_a` 指向 GPU 侧 device memory。CPU 代码可以保存、传递 `d_a`，并把它传给 `cudaMemcpy` 或 kernel launch，但不能直接用 `d_a[0]` 访问其内容。GPU kernel 可以直接使用 `d_a` 读写 device memory。
+**Explanation (English):** CPU code prepares data in one address space and
+GPU kernels normally execute against another, requiring explicit transfers.
 
-### 3. global memory 和 device memory 的关系
+**解说（中文）：** CUDA 程序通常由 CPU 准备数据、GPU 执行 kernel，两端通常
+使用不同内存空间，需要显式拷贝。
 
-**Question:** 在 CUDA 中，`global memory` 是什么？它和 `device memory` 是完全一样的吗？
+**Correct Answer (English):** Host memory is CPU-side memory; device memory is
+GPU-side memory. A host array must normally be copied to device memory with
+`cudaMemcpy` before a kernel can access it.
 
-**Explanation:** `device memory` 是较宽泛的 GPU 侧内存说法，`global memory` 是其中最常用的一类内存空间。
+**正确答案（中文）：** Host memory 是 CPU 侧内存，Device memory 是 GPU 侧
+内存。CPU 普通数组位于 Host memory，通常需要用 `cudaMemcpy` 拷到 Device
+memory 后才能供 kernel 使用。
 
-**Correct Answer:** `global memory` 是 GPU 显存中的主要内存空间，所有 thread、所有 block 都可以访问。`cudaMalloc` 分配出来的内存通常可以理解为 global memory。`device memory` 是更宽泛的说法，可能泛指 GPU 侧内存。
+### 2. A pointer returned by cudaMalloc / cudaMalloc 返回的指针
 
-### 4. shared memory 和 global memory 的区别
+**Question (English):** Where does `d_a` point after
+`cudaMalloc(&d_a, size)`, and how can CPU and GPU code use it?
 
-**Question:** `shared memory` 是什么？它和 `global memory` 在访问范围、速度、生命周期上有什么区别？
+**问题（中文）：** `cudaMalloc(&d_a, size)` 后的 `d_a` 指向哪里？CPU 与 GPU
+代码分别如何使用它？
 
-**Explanation:** shared memory 是 block 内线程协作的重要工具，常用于缓存 global memory 中的一小块数据。
+**Explanation (English):** CPU code can hold a device-pointer value without
+being able to dereference it like host memory.
 
-**Correct Answer:** shared memory 是每个 block 独有的一块片上存储，同一个 block 内的 thread 可以共享。global memory 可被所有 block/thread 访问，容量大但延迟高；shared memory 只在 block 内可见，容量小但速度快。global memory 在 kernel 结束后仍存在，直到 `cudaFree`；shared memory 随 block 开始而存在，随 block 结束而消失。
+**解说（中文）：** CPU 可以保存 Device pointer 的数值，但不能把它当普通 Host
+pointer 直接解引用。
 
-### 5. block 之间为什么不能直接用 shared memory 通信？
+**Correct Answer (English):** It points to GPU device memory. Host code can
+store it and pass it to CUDA APIs or a kernel launch, but normally cannot read
+`d_a[0]` directly. A GPU kernel can dereference it.
 
-**Question:** 为什么不同 block 之间不能直接通过 shared memory 交换数据？如果两个 block 要交换结果，通常应该通过什么内存？
+**正确答案（中文）：** `d_a` 指向 GPU Device memory。CPU 可以保存、传递它，
+并传给 `cudaMemcpy` 或 kernel launch，但通常不能直接访问 `d_a[0]`；GPU
+kernel 可以直接读写。
 
-**Explanation:** shared memory 是 per-block 的，每个 block 都有自己的 shared memory 实例。
+### 3. Global memory versus device memory / Global memory 与 Device memory
 
-**Correct Answer:** 不同 block 的 shared memory 相互独立，不能直接访问彼此的数据。跨 block 交换结果通常通过 global memory 完成。普通 CUDA 中同一个 kernel 内没有隐式全 grid 同步，常见做法是让一个 kernel 写 global memory，再通过 kernel 边界作为同步点，让后续 kernel 读取。
+**Question (English):** Is global memory identical to the broader term device
+memory?
 
-### 6. register 的用途和访问范围
+**问题（中文）：** global memory 与更宽泛的 Device memory 完全相同吗？
 
-**Question:** `register` 在 CUDA 里通常存放什么？它和 `shared memory` 的访问范围有什么区别？
+**Explanation (English):** Device memory broadly describes GPU-side memory;
+global memory is its main large, device-wide address space.
 
-**Explanation:** register 是线程私有的最快存储，通常由编译器为局部变量和临时值分配。
+**解说（中文）：** Device memory 是较宽泛的 GPU 侧内存说法；global memory 是
+其中最常用的一类。
 
-**Correct Answer:** register 通常存放局部变量、临时计算结果、频繁使用的小标量。register 属于单个 thread，其他 thread 不能访问；shared memory 属于一个 block，同一个 block 内的 thread 可以共同访问。
+**Correct Answer (English):** Global memory is the large VRAM-backed space
+accessible to all blocks and threads, and `cudaMalloc` allocations are
+normally treated as global memory. “Device memory” can refer more generally
+to GPU-side memory.
 
-### 7. 普通局部变量在哪里？
+**正确答案（中文）：** global memory 是所有 block/thread 都能访问的主要显存
+空间，`cudaMalloc` 分配通常可理解为 global memory。Device memory 则可能泛指
+GPU 侧内存。
 
-**Question:** 如果一个 kernel 里定义了普通局部变量：
+### 4. Shared versus global memory / Shared memory 与 global memory
 
-```cpp
+**Question (English):** Compare visibility, speed, and lifetime.
+
+**问题（中文）：** 比较 shared memory 与 global memory 的访问范围、速度和
+生命周期。
+
+**Explanation (English):** Shared memory is a block-cooperation tool and
+often caches a small subset of global-memory data.
+
+**解说（中文）：** shared memory 是 block 内协作工具，常用于缓存 global
+memory 的一小块数据。
+
+**Correct Answer (English):** Global memory is large, high-latency, visible
+device-wide, and persists until freed. Shared memory is small, fast,
+block-local on-chip storage that exists only while a block runs.
+
+**正确答案（中文）：** global memory 容量大、延迟高、所有 block/thread 可见，
+直到 `cudaFree` 才释放；shared memory 容量小、速度快、每 block 独有，随
+block 执行而存在和消失。
+
+### 5. Cross-block communication / Block 间通信
+
+**Question (English):** Why can different blocks not exchange data directly
+through shared memory, and what is the usual alternative?
+
+**问题（中文）：** 为什么不同 block 不能直接用 shared memory 交换数据？通常
+应通过什么内存？
+
+**Explanation (English):** Every block has a separate shared-memory instance.
+
+**解说（中文）：** shared memory 是 per-block 的，每个 block 都有独立实例。
+
+**Correct Answer (English):** Blocks cannot see one another's shared memory.
+They normally exchange results through global memory. A common global
+synchronization boundary is the end of one kernel followed by another launch.
+
+**正确答案（中文）：** 不同 block 的 shared memory 相互独立。跨 block 结果
+通常写入 global memory，并常用一个 kernel 结束、后续 kernel 启动作为全局同步
+边界。
+
+### 6. Registers / Register 的用途与范围
+
+**Question (English):** What typically lives in registers, and how does their
+visibility differ from shared memory?
+
+**问题（中文）：** register 通常存放什么？它与 shared memory 的访问范围有何
+不同？
+
+**Explanation (English):** Registers are the fastest thread-private storage
+and are normally assigned by the compiler.
+
+**解说（中文）：** register 是最快的 thread-private 存储，通常由编译器分配。
+
+**Correct Answer (English):** Registers hold local variables, temporary
+results, and frequently used scalars. A register belongs to one thread;
+shared memory belongs to one block and is visible to its threads.
+
+**正确答案（中文）：** register 通常保存局部变量、临时结果和频繁使用的小标量。
+register 属于单个 thread；shared memory 属于一个 block，可由 block 内 thread
+共同访问。
+
+### 7. Ordinary local variables / 普通局部变量
+
+**Question (English):** Where is this scalar normally stored, and how many
+instances exist?
+
+**问题（中文）：** 下面标量通常存在哪里？它是每 thread 一份还是每 block 一份？
+
+~~~cpp
 float sum = 0.0f;
-```
+~~~
 
-你觉得 `sum` 通常会放在哪里？它是每个 thread 一份，还是整个 block 一份？
+**Explanation (English):** Ordinary local scalars are thread-private.
 
-**Explanation:** 普通局部标量变量通常是 thread-private 的。每个 thread 执行 kernel 代码时都有自己的局部变量实例。
+**解说（中文）：** 普通局部标量是 thread-private 的，每个 thread 执行 kernel
+时都有自己的实例。
 
-**Correct Answer:** `sum` 通常会放在 register 中，并且是每个 thread 一份，不是整个 block 一份。如果一个 block 有 256 个 thread，那么通常有 256 份彼此独立的 `sum`。
+**Correct Answer (English):** It is normally stored in a register, with one
+independent `sum` per thread. A 256-thread block normally has 256 instances.
 
-### 8. `__shared__` 数组的作用
+**正确答案（中文）：** `sum` 通常位于 register，每个 thread 有一份。一个
+256-thread block 通常有 256 份彼此独立的 `sum`。
 
-**Question:** 如果一个 kernel 里写：
+### 8. A __shared__ array / __shared__ 数组
 
-```cpp
+**Question (English):** Is this tile per thread or per block, and what problem
+does it normally solve?
+
+**问题（中文）：** 下面的 tile 是每 thread 一份还是每 block 一份？通常用于
+解决什么问题？
+
+~~~cpp
 __shared__ float tile[32][32];
-```
+~~~
 
-这个 `tile` 是每个 thread 一份，还是每个 block 一份？它通常用来解决什么问题？
+**Explanation (English):** `__shared__` explicitly declares block-shared
+storage for reuse and cooperation.
 
-**Explanation:** `__shared__` 显式声明 shared memory，常用于 block 内数据复用和协作计算。
+**解说（中文）：** `__shared__` 显式声明 shared memory，常用于 block 内数据
+复用和协作计算。
 
-**Correct Answer:** `tile` 是每个 block 一份，block 内所有 thread 共享这一份。它通常用于缓存 global memory 中的一小块数据，让 block 内线程快速读写、复用数据，或完成 transpose、reduction、stencil 等 block 内协作计算。
+**Correct Answer (English):** There is one tile per block, shared by all its
+threads. It caches global-memory data and supports transpose, reduction,
+stencil, and other cooperative computations.
 
-### 9. shared memory 和 `__syncthreads()`
+**正确答案（中文）：** 每个 block 有一份 `tile`，由 block 内所有 thread 共享。
+它用于缓存 global memory 数据并支持 transpose、reduction、stencil 等协作计算。
 
-**Question:** 为什么 shared memory 通常需要配合 `__syncthreads()` 使用？如果一个 thread 还没把数据写入 shared memory，另一个 thread 就去读，会有什么问题？
+### 9. Shared memory and __syncthreads / Shared memory 与 __syncthreads
 
-**Explanation:** shared memory 经常用于 thread 之间交换数据，因此需要保证写入完成后再读取。
+**Question (English):** Why is a barrier often required between shared-memory
+writes and reads?
 
-**Correct Answer:** `__syncthreads()` 是 block 内屏障同步。同一个 block 内所有 thread 都到达这个点之后，才会继续往下执行。如果没有同步，某些 thread 可能还没写完 shared memory，其他 thread 就已经读取，可能读到旧值、未初始化值或不完整数据。
+**问题（中文）：** 为什么 shared memory 写入和读取之间经常需要
+`__syncthreads()`？
 
-### 10. 几种 memory 的整体总结
+**Explanation (English):** Shared memory exchanges data among threads, so
+consumers must wait for producers.
 
-**Question:** 请用自己的话总结下面几种 memory：
+**解说（中文）：** shared memory 经常用于 thread 间交换数据，需要保证写入
+完成后再读取。
 
-```text
-register
-shared memory
-global memory
-host memory
-```
+**Correct Answer (English):** `__syncthreads()` is a block-wide barrier.
+Without it, some threads can read before others finish writing and observe
+old, uninitialized, or incomplete values.
 
-分别在哪里、谁能访问、速度大致如何？
+**正确答案（中文）：** `__syncthreads()` 是 block 内屏障。没有同步时，某些
+thread 可能在其他 thread 写完前读取，得到旧值、未初始化值或不完整数据。
 
-**Explanation:** 理解 memory 层级的关键，是同时看位置、访问范围、速度和生命周期。
+### 10. Memory hierarchy summary / 内存层级总结
 
-**Correct Answer:**
+**Question (English):** Summarize location, visibility, speed, and use for
+registers, shared memory, global memory, and host memory.
 
-```text
-register
-位置：GPU SM 内的寄存器资源
-访问者：单个 thread 私有
-速度：最快
-用途：局部变量、临时计算结果
+**问题（中文）：** 总结 register、shared memory、global memory 和 Host memory
+的位置、访问者、速度与用途。
 
-shared memory
-位置：GPU SM 上的片上共享存储
-访问者：同一个 block 内的 thread
-速度：很快，但要注意 bank conflict
-用途：block 内协作、缓存 tile、数据复用
+**Explanation (English):** A useful memory model combines all four
+dimensions, not speed alone.
 
-global memory
-位置：GPU 显存/device memory
-访问者：所有 thread、所有 block
-速度：较慢，延迟高
-用途：大数组、kernel 输入输出、跨 block 数据交换
+**解说（中文）：** 理解内存层级需要同时考虑位置、访问范围、速度和生命周期。
 
-host memory
-位置：CPU 内存
-访问者：CPU 代码
-速度：对 GPU 来说不能像 device memory 那样直接高效访问
-用途：CPU 端准备数据、接收 GPU 计算结果
-```
+**Correct Answer (English):**
 
-## 今日总结
+**正确答案（中文）：**
 
-今天已经理解：
+| Memory / 内存 | Location / 位置 | Visibility / 访问范围 | Relative speed / 相对速度 | Typical use / 典型用途 |
+| --- | --- | --- | --- | --- |
+| Register / 寄存器 | SM register file / SM 寄存器资源 | One thread / 单个 thread | Fastest / 最快 | Locals and temporaries / 局部变量与临时结果 |
+| Shared memory / 共享内存 | On-chip SM storage / SM 片上存储 | One block / 一个 block | Very fast; bank conflicts matter / 很快；需注意 bank conflict | Tiles, reuse, cooperation / tile、复用与协作 |
+| Global memory / 全局内存 | GPU VRAM / GPU 显存 | All blocks and threads / 所有 block 与 thread | High latency / 延迟较高 | Arrays, kernel I/O, cross-block exchange / 数组、kernel 输入输出、跨 block 交换 |
+| Host memory / 主机内存 | CPU memory / CPU 内存 | Host code / Host 代码 | Not ordinary device-accessible storage / 不是 GPU 的普通高效访问空间 | Prepare inputs and receive results / 准备输入与接收结果 |
 
-- `host memory` 是 CPU 侧内存，`device memory` 是 GPU 侧内存。
-- `cudaMalloc` 分配的是 GPU 侧 device/global memory。
-- CPU 可以保存 device pointer，但不能像普通数组一样直接解引用。
-- `global memory` 是所有 block/thread 都能访问的 GPU 显存，容量大但延迟高。
-- `shared memory` 是每个 block 一份，block 内 thread 共享，速度快但容量有限。
-- `register` 是每个 thread 私有，通常保存局部变量和临时计算结果。
-- 普通局部变量通常每个 thread 一份，不是整个 block 一份。
-- shared memory 常常需要配合 `__syncthreads()` 避免读写顺序问题。
-- block 间通信通常通过 global memory，并经常需要 kernel 边界作为同步点。
+## Summary / 今日总结
 
-## 易错点
+- **English:** Host and device memory are distinct address spaces.
+  **中文：** Host memory 与 Device memory 是不同地址空间。
+- **English:** `cudaMalloc` returns global-memory device pointers that host
+  code normally cannot dereference.
+  **中文：** `cudaMalloc` 返回 global-memory Device pointer，Host 通常不能
+  直接解引用。
+- **English:** Registers are thread-private, while shared memory is
+  block-private and cooperative.
+  **中文：** register 是 thread-private；shared memory 是 block-private 且用于
+  协作。
+- **English:** Cross-block exchange normally uses global memory and a kernel
+  boundary.
+  **中文：** 跨 block 交换通常使用 global memory 与 kernel 边界。
+- **English:** Shared-memory communication needs correct synchronization.
+  **中文：** shared-memory 通信需要正确同步。
 
-- `host memory` 是 CPU 侧内存，不是 GPU 侧内存。
-- shared memory 不是从 global memory 分出来的，它是 SM 上的片上共享存储。
-- register 是 thread-private；shared memory 是 block-private。
-- 普通局部变量不是整个 block 一份，而是每个 thread 一份。
+## Common Mistakes / 易错点
 
-## 下一步
+- **English:** Locating host memory on the GPU.
+  **中文：** 把 Host memory 放到 GPU 侧理解。
+- **English:** Treating shared memory as a partition of global memory rather
+  than separate on-chip storage.
+  **中文：** 把 shared memory 当作从 global memory 划出的一部分，而不是片上
+  存储。
+- **English:** Confusing thread-private registers with block-private shared
+  memory.
+  **中文：** 混淆 thread-private register 与 block-private shared memory。
+- **English:** Assuming one local variable instance is shared by a block.
+  **中文：** 误以为普通局部变量每 block 一份，而不是每 thread 一份。
 
-- global memory coalescing
-- 连续访问显存为什么更快
-- warp 和 memory transaction 的关系
-- shared memory bank conflict 的实践观察
+## Next Steps / 下一步
+
+- **English:** Study coalescing, warps, memory transactions, and practical
+  shared-memory bank conflicts.
+  **中文：** 学习 coalescing、warp、memory transaction，以及 shared-memory
+  bank conflict 的实践表现。

@@ -1,142 +1,273 @@
-# Day 007: SGLang Serving Workflow
+# Day 007: SGLang Serving Workflow / SGLang 服务流程
 
-Date: 2026-06-11
+Date / 日期: 2026-06-11
 
-## 今日目标
+## Topic / 主题
 
-今天继续学习 SGLang，重点理解一个请求进入 LLM serving runtime 后的大致流程，以及 scheduler、batching、KV cache、TTFT / TPOT、throughput / latency 如何共同影响在线推理服务。
+**English:** The request path through an LLM serving runtime, token-aware
+scheduling, prefill/decode workload shapes, batching, KV-cache pressure, and
+throughput/latency trade-offs.
 
-## 10 个概念问题
+**中文：** LLM serving runtime 中的请求路径、token-aware 调度、prefill/decode
+负载形态、batching、KV-cache 压力以及吞吐/延迟权衡。
 
-### 1. 请求进入 serving runtime 的顺序
+## Goal / 目标
 
-**Question:** 一个用户请求进入 SGLang 这类 LLM serving 系统后，下面这些步骤大致应该按什么顺序发生？
+**English:** Understand how scheduler, batching, KV cache, TTFT, TPOT,
+throughput, and latency interact after a request enters SGLang.
 
-```text
+**中文：** 理解请求进入 SGLang 后，scheduler、batching、KV cache、TTFT、TPOT、
+throughput 与 latency 如何共同影响在线服务。
+
+## 10 Concept Questions / 10 个概念问题
+
+### 1. Request flow / 请求进入 runtime 的顺序
+
+**Question (English):** Put these serving steps in a reasonable order:
+
+**问题（中文）：** 将下面的 serving 步骤按合理顺序排列：
+
+~~~text
 A. 模型逐 token 生成输出
 B. 请求进入 server
 C. tokenizer 把文本变成 tokens
 D. prefill 处理 prompt 并建立 KV cache
 E. scheduler 决定请求什么时候运行、是否和其他请求 batch
-```
+~~~
 
-**Explanation:** 模型不能直接处理原始文本，需要先 tokenization。scheduler 通常需要知道 token 数量、资源需求等信息，才能做排队和 batching 决策。
+**Explanation (English):** Models consume tokens rather than raw text, and
+the scheduler normally needs token counts and resource estimates before making
+batching decisions.
 
-**Correct Answer:** 更合理的顺序是：
+**解说（中文）：** 模型不能直接处理原始文本，需要先 tokenization。scheduler
+通常需要 token 数量和资源需求等信息才能排队与 batching。
 
-```text
-B -> C -> E -> D -> A
-```
+**Correct Answer (English):** `B -> C -> E -> D -> A`: receive the request,
+tokenize it, schedule and batch it, prefill the prompt and build KV cache, then
+decode output tokens.
 
-也就是：请求进入 server，tokenizer 把文本变成 tokens，scheduler 决定何时运行和如何 batch，prefill 处理 prompt 并建立 KV cache，最后 decode 阶段逐 token 生成输出。
+**正确答案（中文）：** `B -> C -> E -> D -> A`：请求进入 server，tokenizer
+把文本变成 tokens，scheduler 决定何时运行及如何 batch，prefill 建立 KV cache，
+最后 decode 逐 token 生成输出。
 
-### 2. scheduler 为什么需要 token 数量
+### 2. Why the scheduler needs token counts / Scheduler 为何需要 token 数
 
-**Question:** 为什么 scheduler 需要知道 prompt 的 token 数量？请从 prefill 成本、KV cache 显存、batching、TTFT 几个角度解释。
+**Question (English):** Why does prompt length matter to scheduling?
 
-**Explanation:** prompt token 数量不是普通元数据，而是 serving 调度的重要资源估计依据。
+**问题（中文）：** 为什么 scheduler 需要知道 prompt 的 token 数量？
 
-**Correct Answer:** prompt token 数量影响 prefill 计算成本、KV cache 显存占用、batching 策略和 TTFT。prompt 越长，prefill 通常越重，需要保存的 K/V 越多，首 token 延迟通常也越长。
+**Explanation (English):** Token count is a resource estimate, not merely
+request metadata.
 
-### 3. 短 prompt 与长 prompt 的压力差异
+**解说（中文）：** prompt token 数量不是普通元数据，而是调度的重要资源估计。
 
-**Question:** 假设有两个请求：
+**Correct Answer (English):** It influences prefill compute, KV-cache memory,
+batch composition, and TTFT. Longer prompts are normally more expensive to
+prefill, retain more K/V state, and take longer to produce a first token.
 
-```text
+**正确答案（中文）：** token 数量影响 prefill 成本、KV cache 显存、batching
+策略和 TTFT。prompt 越长，prefill 越重，需要保存的 K/V 越多，首 token 延迟
+通常也越长。
+
+### 3. Short versus long prompts / 短 prompt 与长 prompt
+
+**Question (English):** How do these requests differ in system pressure?
+
+**问题（中文）：** 下面两个请求对 serving 系统的压力有什么不同？
+
+~~~text
 Request A: prompt 长度 20 tokens
 Request B: prompt 长度 8000 tokens
-```
+~~~
 
-它们对 serving 系统的压力有什么不同？
+**Explanation (English):** A long prompt affects not only its own latency but
+also memory capacity and scheduling for other requests.
 
-**Explanation:** 长 prompt 不只是单个请求慢，也会影响显存占用和其他请求调度。
+**解说（中文）：** 长 prompt 不只让单个请求变慢，也影响显存占用和其他请求调度。
 
-**Correct Answer:** Request A 的 prefill 很轻，KV cache 小，TTFT 通常短，比较容易和其他请求一起调度。Request B 的 prefill 很重，KV cache 大，TTFT 通常长，可能占用更多显存和 prefill 计算资源，scheduler 可能需要限制、排队或单独处理。
+**Correct Answer (English):** A has light prefill, small KV cache, and usually
+short TTFT. B has expensive prefill, large KV cache, and usually long TTFT; it
+may need admission limits, queueing, or separate treatment.
 
-### 4. prefill-heavy / decode-heavy
+**正确答案（中文）：** A 的 prefill 轻、KV cache 小、TTFT 通常短，容易与其他
+请求调度。B 的 prefill 重、KV cache 大、TTFT 通常长，可能需要限制、排队或
+单独处理。
 
-**Question:** 什么样的请求更 prefill-heavy？什么样的请求更 decode-heavy？
+### 4. Prefill-heavy versus decode-heavy / Prefill-heavy 与 decode-heavy
 
-**Explanation:** prefill-heavy 和 decode-heavy 的判断重点不同：一个看输入侧，一个看输出侧。
+**Question (English):** Which requests are prefill-heavy, and which are
+decode-heavy?
 
-**Correct Answer:** prompt 很长、输入 token 很多、包含图像或长文档上下文的请求更 prefill-heavy。需要生成很多输出 tokens 的请求更 decode-heavy。图片 / 多模态输入通常更可能增加输入处理和 prefill 侧成本，不一定代表 decode-heavy。
+**问题（中文）：** 什么请求更 prefill-heavy？什么请求更 decode-heavy？
 
-### 5. 长输出请求为什么持续占用资源
+**Explanation (English):** Input length determines prefill pressure, while
+output length determines decode pressure.
 
-**Question:** 为什么长输出请求，也就是 decode-heavy 请求，会持续占用 serving 系统资源？请从逐 token 生成、KV cache、scheduler、TPOT 角度解释。
+**解说（中文）：** 判断 prefill-heavy 主要看输入侧；判断 decode-heavy 主要看
+输出侧。
 
-**Explanation:** decode 不是一次算完，而是一个 token 一个 token 地生成，每一步都需要模型继续运行。
+**Correct Answer (English):** Long prompts, document context, or multimodal
+inputs tend to be prefill-heavy. Requests generating many output tokens are
+decode-heavy. An image increases input-side work but does not by itself imply
+long decode.
 
-**Correct Answer:** decode-heavy 请求需要持续逐 token 生成，每生成一个 token 都要运行一次 decode step。整个过程中 KV cache 不能释放，scheduler 需要反复把它放进 decode batch。TPOT 越高，每个 token 花费越久，资源占用时间越长。
+**正确答案（中文）：** 长 prompt、长文档上下文或多模态输入更 prefill-heavy；
+需要生成很多输出 token 的请求更 decode-heavy。图片增加输入侧成本，但不一定
+代表 decode-heavy。
 
-### 6. batching 的吞吐和延迟权衡
+### 5. Why long outputs retain resources / 长输出为何持续占用资源
 
-**Question:** 为什么 batching 能提高吞吐？为什么 batching 也可能增加某些请求的延迟？
+**Question (English):** Why does a decode-heavy request keep consuming
+resources?
 
-**Explanation:** batching 可以更充分利用 GPU 并行能力，但等待和混合不同请求也会带来延迟代价。
+**问题（中文）：** 为什么 decode-heavy 长输出请求会持续占用系统资源？
 
-**Correct Answer:** batching 把多个请求一起跑，可以提高 GPU 利用率和系统吞吐。但请求可能要等待凑 batch，短请求可能被长请求拖慢，prefill-heavy 请求可能让同 batch 的请求首 token 更慢，因此 TTFT 或其他 latency 指标可能上升。
+**Explanation (English):** Decode advances one token at a time, with another
+model step for every token.
 
-### 7. throughput / latency
+**解说（中文）：** decode 不是一次完成，而是逐 token 生成，每一步都需要模型
+继续运行。
 
-**Question:** LLM serving 里常说 `throughput` 和 `latency`。这两个指标有什么区别？
+**Correct Answer (English):** The request repeatedly joins decode batches,
+retains its KV cache until completion, and performs one dependent step per
+token. Higher TPOT extends the period for which those resources remain held.
 
-**Explanation:** 一个看单位时间处理多少工作，一个看单个请求花了多久。
+**正确答案（中文）：** 请求每生成一个 token 都运行一次 decode step，持续加入
+decode batch，且完成前不能释放 KV cache。TPOT 越高，资源占用时间越长。
 
-**Correct Answer:** throughput 是单位时间内系统处理了多少工作，例如 requests/s、tokens/s、output tokens/s。latency 是单个请求从开始到完成或到某个阶段花了多久，例如 TTFT、TPOT、end-to-end latency。大 batch 可能提高 throughput，但也可能增加某些请求 latency。
+### 6. Batching trade-offs / Batching 的吞吐与延迟权衡
 
-### 8. KV cache 是资源管理问题
+**Question (English):** Why can batching improve throughput yet increase some
+request latencies?
 
-**Question:** 为什么 KV cache 不只是性能优化，也是 serving 系统的资源管理问题？
+**问题（中文）：** 为什么 batching 能提高吞吐，却也可能增加某些请求的延迟？
 
-**Explanation:** KV cache 不是减少显存使用，而是用显存保存历史 token 的 K/V，以减少重复计算。
+**Explanation (English):** Batching fills GPU parallel capacity but can add
+waiting and interference among heterogeneous requests.
 
-**Correct Answer:** KV cache 是用显存换计算。并发请求越多、上下文越长、输出越长，KV cache 显存压力越大。scheduler 需要决定哪些请求能进入、哪些要等待、哪些 cache 可以复用或释放，因此 KV cache 也是显存和请求调度的资源管理问题。
+**解说（中文）：** batching 更充分利用 GPU 并行能力，但等待和混合不同请求也会
+产生延迟代价。
 
-### 9. throughput 可能牺牲哪些 latency
+**Correct Answer (English):** Running requests together can raise utilization
+and throughput. However, requests may wait for a batch; short work may be
+delayed by long work; and a heavy prefill can increase TTFT for others.
 
-**Question:** 如果一个系统追求更高 throughput，可能会牺牲哪些 latency 指标？为了提高 tokens/s，可能会让什么变慢？
+**正确答案（中文）：** 多个请求一起运行可提高 GPU 利用率与吞吐，但请求可能等待
+凑 batch，短请求可能被长请求拖慢，重 prefill 也可能增加其他请求的 TTFT。
 
-**Explanation:** serving 系统经常在 GPU 利用率和用户等待时间之间做权衡。
+### 7. Throughput versus latency / Throughput 与 latency
 
-**Correct Answer:** 追求更高 throughput 可能牺牲 TTFT、TPOT、end-to-end latency 或 tail latency。例如等待更多请求凑 batch、优先填满 GPU，可能让某些请求更晚开始 prefill 或更晚拿到第一个 token，从而增加 TTFT。
+**Question (English):** What does each metric describe?
 
-### 10. serving runtime 的核心直觉
+**问题（中文）：** throughput 和 latency 分别描述什么？
 
-**Question:** 为什么 serving runtime 不只是“把模型跑起来”，而是一个调度和资源管理系统？请尽量使用 scheduler、batching、KV cache、TTFT / TPOT、throughput / latency。
+**Explanation (English):** One measures work completed per unit time; the
+other measures time experienced by an individual request or stage.
 
-**Explanation:** 在线 LLM serving 的难点不只是单次模型计算，还包括不同长度、不同阶段、不同输出需求的请求如何共享有限 GPU 资源。
+**解说（中文）：** 一个看单位时间处理多少工作，另一个看单个请求或阶段花费多久。
 
-**Correct Answer:** SGLang 这类 serving runtime 通过 scheduler 管理 batching、KV cache 和 GPU 资源，在 throughput / latency 之间做权衡，并优化 TTFT、TPOT 等用户可感知指标。它本质上是一个面向在线推理的调度和资源管理系统。
+**Correct Answer (English):** Throughput includes requests/s or tokens/s.
+Latency includes TTFT, TPOT, and end-to-end request time. Larger batches may
+raise throughput while increasing individual latency.
 
-## 今日总结
+**正确答案（中文）：** throughput 是单位时间处理的工作量，例如 requests/s、
+tokens/s；latency 是单个请求或阶段耗时，例如 TTFT、TPOT、end-to-end latency。
+大 batch 可能提高 throughput，也可能增加 latency。
 
-今天已经理解：
+### 8. KV cache as resource management / KV cache 是资源管理问题
 
-- 请求进入 serving 系统后，通常经历 server -> tokenizer -> scheduler -> prefill -> decode
-- scheduler 需要知道 prompt token 数量，因为它影响 prefill 成本、KV cache、batching 和 TTFT
-- 长 prompt 请求更 prefill-heavy
-- 长输出请求更 decode-heavy
-- 图片 / 多模态输入更可能增加输入处理和 prefill 侧成本
-- decode-heavy 请求会持续占用 KV cache 和调度名额
-- batching 能提高 GPU 利用率和 throughput，但可能增加 TTFT
-- throughput 关注单位时间处理多少工作
-- latency 关注单个请求等待和完成耗时
-- KV cache 是用显存换计算，不是减少显存使用
-- KV cache 也是 serving 系统的资源管理问题
-- 追求更高 throughput 可能牺牲 TTFT、TPOT、end-to-end latency 或 tail latency
-- serving runtime 本质是调度和资源管理系统
+**Question (English):** Why is KV cache both an optimization and a resource
+management concern?
 
-## 易错点
+**问题（中文）：** 为什么 KV cache 不只是性能优化，也是资源管理问题？
 
-- tokenizer 通常发生在 prefill 之前，模型处理的是 tokens，不是原始字符串。
-- KV cache 通常增加显存占用，用来减少重复计算。
-- 图片 / 多模态输入更偏输入侧成本，不一定代表 decode-heavy。
-- batching 不是越大越好，它会影响延迟和公平性。
-- throughput 和 latency 经常需要权衡，不能只看 tokens/s。
+**Explanation (English):** KV cache trades GPU memory for less repeated
+computation; it does not reduce memory use.
 
-## 下一步
+**解说（中文）：** KV cache 用显存换计算，并不是减少显存占用。
 
-- 在 `docs/glossary.md` 中补充 throughput、latency、tail latency、tokenizer、batching
-- 后续跑一个 SGLang 最小 serving demo
-- 记录 TTFT / TPOT / throughput 的简单 benchmark
+**Correct Answer (English):** More concurrent requests and longer contexts or
+outputs retain more cache. The scheduler must admit, queue, reuse, or release
+state under a finite memory budget.
+
+**正确答案（中文）：** 并发越多、上下文或输出越长，KV cache 显存压力越大。
+scheduler 必须在有限预算下决定哪些请求进入、等待，以及哪些 cache 复用或释放。
+
+### 9. Latency sacrificed for throughput / 高吞吐可能牺牲的延迟
+
+**Question (English):** Which latency metrics can worsen when a system
+optimizes aggressively for tokens/s?
+
+**问题（中文）：** 系统追求更高 throughput 时，哪些 latency 指标可能变差？
+
+**Explanation (English):** Serving systems trade GPU utilization against
+individual waiting time.
+
+**解说（中文）：** serving 系统经常在 GPU 利用率和用户等待时间间权衡。
+
+**Correct Answer (English):** TTFT, TPOT, end-to-end latency, and tail latency
+can all increase. Waiting to form fuller batches may delay prefill and the
+first token even while aggregate tokens/s improves.
+
+**正确答案（中文）：** TTFT、TPOT、end-to-end latency 和 tail latency 都可能
+上升。例如等待更多请求凑 batch 会推迟 prefill 和首 token，尽管总 tokens/s
+提高。
+
+### 10. Core serving-runtime intuition / Serving runtime 的核心直觉
+
+**Question (English):** Why is a serving runtime more than “running a model”?
+
+**问题（中文）：** 为什么 serving runtime 不只是“把模型跑起来”？
+
+**Explanation (English):** Heterogeneous online requests must share finite GPU
+compute and memory across different execution phases.
+
+**解说（中文）：** 不同长度、不同阶段和不同输出需求的在线请求需要共享有限 GPU
+计算与显存资源。
+
+**Correct Answer (English):** SGLang uses a scheduler to manage batching, KV
+cache, and GPU resources while balancing throughput, latency, TTFT, and TPOT.
+It is fundamentally an online scheduling and resource-management system.
+
+**正确答案（中文）：** SGLang 通过 scheduler 管理 batching、KV cache 与 GPU
+资源，在 throughput/latency 间权衡并优化 TTFT、TPOT。它本质上是在线推理调度
+与资源管理系统。
+
+## Summary / 今日总结
+
+- **English:** A request normally flows through server, tokenizer, scheduler,
+  prefill, and decode.
+  **中文：** 请求通常经历 server、tokenizer、scheduler、prefill 和 decode。
+- **English:** Token counts estimate prefill cost, cache pressure, and TTFT.
+  **中文：** token 数量用于估计 prefill 成本、cache 压力和 TTFT。
+- **English:** Long input is prefill-heavy; long output is decode-heavy.
+  **中文：** 长输入更 prefill-heavy；长输出更 decode-heavy。
+- **English:** Batching and KV cache couple utilization, memory, throughput,
+  and latency.
+  **中文：** batching 与 KV cache 把利用率、显存、吞吐和延迟联系起来。
+- **English:** Serving optimization must consider TTFT, TPOT, end-to-end, and
+  tail latency rather than tokens/s alone.
+  **中文：** serving 优化不能只看 tokens/s，还要看 TTFT、TPOT、端到端和尾延迟。
+
+## Common Mistakes / 易错点
+
+- **English:** Placing tokenization after prefill.
+  **中文：** 把 tokenizer 放到 prefill 之后。
+- **English:** Assuming KV cache reduces GPU-memory use.
+  **中文：** 误以为 KV cache 减少显存占用。
+- **English:** Treating multimodal input as necessarily decode-heavy.
+  **中文：** 把多模态输入直接等同于 decode-heavy。
+- **English:** Assuming a larger batch is always better.
+  **中文：** 误以为 batch 越大越好。
+- **English:** Optimizing throughput without measuring latency.
+  **中文：** 只优化 throughput 而不测 latency。
+
+## Next Steps / 下一步
+
+- **English:** Add tokenizer, batching, throughput, latency, and tail-latency
+  terms to the glossary.
+  **中文：** 在 glossary 中补充 tokenizer、batching、throughput、latency 和
+  tail latency。
+- **English:** Run a minimal SGLang service and benchmark TTFT, TPOT, and
+  throughput.
+  **中文：** 跑通最小 SGLang 服务并测量 TTFT、TPOT 与 throughput。

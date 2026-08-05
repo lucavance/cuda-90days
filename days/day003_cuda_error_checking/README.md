@@ -1,43 +1,79 @@
-# Day 003: CUDA Error Checking
+# Day 003: CUDA Error Checking / CUDA 错误检查
 
-Date: 2026-06-09
+Date / 日期: 2026-06-09
 
-## 今日目标
+## Topic / 主题
 
-今天继续轻量学习 CUDA 基础概念，重点把前两天的 kernel launch、同步和错误暴露机制落成最小工程习惯：检查 CUDA API 返回值，使用 `CUDA_CHECK` 宏，并在调试阶段正确检查 kernel launch error 和 runtime error。
+**English:** CUDA Runtime API return values, readable error messages, a safe
+`CUDA_CHECK` macro, kernel launch/runtime checks, and synchronization policy
+for debugging versus benchmarking.
 
-## 10 个概念问题
+**中文：** CUDA Runtime API 返回值、可读错误信息、安全的 `CUDA_CHECK` 宏、
+kernel launch/runtime 检查，以及调试与 benchmark 中不同的同步策略。
 
-### 1. `cudaError_t` / `cudaSuccess`
+## Goal / 目标
 
-**Question:** 在 CUDA Runtime API 里，很多函数都会返回一个值，比如：
+**English:** Turn the first two days' concepts about launches,
+synchronization, and deferred errors into a minimal engineering discipline for
+checking every CUDA operation.
 
-```cpp
+**中文：** 把前两天关于 kernel launch、同步和延迟错误的概念落成最小工程习惯：
+检查 CUDA API 返回值，并在调试阶段正确区分 launch error 与 runtime error。
+
+## 10 Concept Questions / 10 个概念问题
+
+### 1. cudaError_t and cudaSuccess / cudaError_t 与 cudaSuccess
+
+**Question (English):** Explain `cudaError_t`, `cudaSuccess`, and
+`err != cudaSuccess` in this call:
+
+**问题（中文）：** 解释下面代码中的 `cudaError_t`、`cudaSuccess` 和
+`err != cudaSuccess`：
+
+~~~cpp
 cudaError_t err = cudaMalloc(&d_a, size);
-```
+~~~
 
-请解释 `cudaError_t`、`cudaSuccess`、`err != cudaSuccess` 分别是什么意思。
+**Explanation (English):** CUDA Runtime APIs normally report success or
+failure through their return values.
 
-**Explanation:** CUDA Runtime API 通常通过返回值报告调用是否成功。理解这个返回值，是写错误检查逻辑的基础。
+**解说（中文）：** CUDA Runtime API 通常通过返回值报告调用是否成功。理解这个
+返回值，是编写错误检查逻辑的基础。
 
-**Correct Answer:** `cudaError_t` 是 CUDA Runtime API 返回的错误类型；`cudaSuccess` 表示调用成功、没有错误；`err != cudaSuccess` 表示返回值不是成功状态，也就是 CUDA API 调用失败。
+**Correct Answer (English):** `cudaError_t` is the CUDA Runtime error type;
+`cudaSuccess` means the call succeeded; and `err != cudaSuccess` means the
+API call failed.
 
-### 2. 为什么要检查 `cudaMalloc`
+**正确答案（中文）：** `cudaError_t` 是 CUDA Runtime API 返回的错误类型；
+`cudaSuccess` 表示调用成功；`err != cudaSuccess` 表示返回值不是成功状态，
+也就是 CUDA API 调用失败。
 
-**Question:** 下面这段代码从“错误检查”的角度看有什么问题？
+### 2. Why cudaMalloc must be checked / 为什么必须检查 cudaMalloc
 
-```cpp
+**Question (English):** What error-checking problem exists in this code?
+
+**问题（中文）：** 下面代码从错误检查角度看有什么问题？
+
+~~~cpp
 float* d_a;
 cudaMalloc(&d_a, size);
 
 vectorAdd<<<numBlocks, blockSize>>>(d_a, d_b, d_c, n);
-```
+~~~
 
-**Explanation:** `cudaMalloc` 可能失败。如果失败后继续使用 `d_a`，后面的 kernel 可能触发更难定位的问题。
+**Explanation (English):** `cudaMalloc` can fail. Continuing with an invalid
+pointer makes later failures harder to locate.
 
-**Correct Answer:** 这段代码没有检查 `cudaMalloc` 的返回值。应该保存并检查 `cudaError_t`：
+**解说（中文）：** `cudaMalloc` 可能失败。如果失败后继续使用 `d_a`，后面的
+kernel 可能触发更难定位的问题。
 
-```cpp
+**Correct Answer (English):** The return value is ignored. Initialize the
+pointer, save the result, and check it:
+
+**正确答案（中文）：** 代码没有检查 `cudaMalloc` 的返回值。应初始化指针、
+保存并检查 `cudaError_t`：
+
+~~~cpp
 float* d_a = nullptr;
 
 cudaError_t err = cudaMalloc(&d_a, size);
@@ -45,41 +81,64 @@ if (err != cudaSuccess) {
     printf("cudaMalloc failed: %s\n", cudaGetErrorString(err));
     return;
 }
-```
+~~~
 
-### 3. `cudaGetErrorString`
+### 3. cudaGetErrorString / cudaGetErrorString
 
-**Question:** `cudaGetErrorString(err)` 的作用是什么？为什么比只打印错误码更有用？
+**Question (English):** What does `cudaGetErrorString(err)` do, and why is it
+more useful than printing only an error code?
 
-```cpp
+**问题（中文）：** `cudaGetErrorString(err)` 的作用是什么？为什么比只打印
+错误码更有用？
+
+~~~cpp
 printf("cudaMalloc failed: %s\n", cudaGetErrorString(err));
-```
+~~~
 
-**Explanation:** `cudaError_t` 是错误枚举值。调试时只看到数字或枚举名，通常不如可读文本直接。
+**Explanation (English):** `cudaError_t` is an enum-like error value; a
+readable message is easier to diagnose.
 
-**Correct Answer:** `cudaGetErrorString(err)` 会把 CUDA 错误转换成可读字符串，比如 `out of memory`、`invalid argument`、`invalid device pointer`。它能让错误信息更容易理解和定位。
+**解说（中文）：** `cudaError_t` 是错误枚举值。调试时，可读文本通常比数字或
+枚举名更直接。
 
-### 4. 为什么需要 `CUDA_CHECK`
+**Correct Answer (English):** It converts the CUDA error to text such as
+`out of memory`, `invalid argument`, or `invalid device pointer`, making the
+failure easier to understand and locate.
 
-**Question:** 如果每次都写下面这几行很重复，为什么很多 CUDA 程序会写一个 `CUDA_CHECK(...)` 宏？
+**正确答案（中文）：** 它会把 CUDA 错误转换成可读字符串，例如
+`out of memory`、`invalid argument`、`invalid device pointer`，使错误更
+容易理解和定位。
 
-```cpp
-cudaError_t err = cudaMalloc(&d_a, size);
-if (err != cudaSuccess) {
-    printf("cudaMalloc failed: %s\n", cudaGetErrorString(err));
-    return;
-}
-```
+### 4. Why use CUDA_CHECK? / 为什么使用 CUDA_CHECK
 
-**Explanation:** CUDA API 调用很多，如果每次手写错误检查，代码会啰嗦，并且容易漏掉某一次检查。
+**Question (English):** Why do many CUDA programs wrap repetitive API error
+checking in a `CUDA_CHECK(...)` macro?
 
-**Correct Answer:** `CUDA_CHECK(...)` 用来封装重复的 CUDA API 错误检查逻辑，减少样板代码，避免漏检查，并且可以统一打印文件名、行号和错误字符串。
+**问题（中文）：** 为什么很多 CUDA 程序会用 `CUDA_CHECK(...)` 宏封装重复的
+API 错误检查？
 
-### 5. `do { ... } while (0)` 宏写法
+**Explanation (English):** CUDA programs make many API calls. Repeating the
+same check is noisy and makes omissions likely.
 
-**Question:** 为什么 `CUDA_CHECK` 宏里经常写成这种形式？
+**解说（中文）：** CUDA API 调用很多，如果每次手写错误检查，代码会啰嗦，也
+容易漏掉某次检查。
 
-```cpp
+**Correct Answer (English):** The macro reduces boilerplate, makes missed
+checks less likely, and centralizes reporting of the file, line, and readable
+error message.
+
+**正确答案（中文）：** `CUDA_CHECK(...)` 封装重复的 CUDA API 错误检查逻辑，
+减少样板代码和漏检查，并统一打印文件名、行号与错误字符串。
+
+### 5. The do-while-zero macro pattern / do-while-zero 宏写法
+
+**Question (English):** Why is a multi-line macro commonly written as follows
+instead of expanding to several bare statements?
+
+**问题（中文）：** 为什么多行 `CUDA_CHECK` 宏经常写成下面形式，而不是直接
+展开多条语句？
+
+~~~cpp
 #define CUDA_CHECK(call) \
     do { \
         cudaError_t err = (call); \
@@ -87,65 +146,114 @@ if (err != cudaSuccess) {
             ... \
         } \
     } while (0)
-```
+~~~
 
-为什么不用简单的多行宏展开？
+**Explanation (English):** A macro that does not behave syntactically like one
+statement can break surrounding `if/else` control flow.
 
-**Explanation:** 这是 C/C++ 多行宏的常见安全写法。宏展开后如果不像一条语句，容易破坏 `if/else` 等控制流结构。
+**解说（中文）：** 如果宏展开后不像一条语句，容易破坏 `if/else` 等控制流
+结构。
 
-**Correct Answer:** `do { ... } while (0)` 让多行宏在语法上表现得像一条普通语句，可以安全地写在 `if/else` 等上下文里，并且调用处能稳定地以分号结尾。
+**Correct Answer (English):** `do { ... } while (0)` makes the expansion act
+like one statement, safe in control-flow contexts and consistently terminated
+by a semicolon at the call site.
 
-### 6. kernel launch 能不能直接放进 `CUDA_CHECK`
+**正确答案（中文）：** `do { ... } while (0)` 让多行宏在语法上表现得像一条
+普通语句，可以安全用于 `if/else` 等上下文，并在调用处稳定地以分号结尾。
 
-**Question:** 下面这种写法能不能直接检查 kernel 内部运行错误？这段代码本身有什么问题？
+### 6. Can a kernel launch be passed to CUDA_CHECK? / Kernel launch 能否传给 CUDA_CHECK
 
-```cpp
+**Question (English):** Can this expression directly check errors that occur
+inside the kernel? What is wrong with it?
+
+**问题（中文）：** 下面写法能否直接检查 kernel 内部运行错误？它本身有什么
+问题？
+
+~~~cpp
 CUDA_CHECK(vectorAdd<<<numBlocks, blockSize>>>(d_a, d_b, d_c, n));
-```
+~~~
 
-**Explanation:** `CUDA_CHECK` 包装的是会返回 `cudaError_t` 的 CUDA Runtime API，而 kernel launch 语法不是普通的返回 `cudaError_t` 的函数调用。
+**Explanation (English):** `CUDA_CHECK` expects an expression returning
+`cudaError_t`. Kernel launch syntax is not such an ordinary function call.
 
-**Correct Answer:** 不能这样写。kernel launch 不能直接塞进 `CUDA_CHECK(...)`。正确做法是先启动 kernel，再检查 launch error 和 runtime error：
+**解说（中文）：** `CUDA_CHECK` 包装的是返回 `cudaError_t` 的 CUDA Runtime
+API，而 kernel launch 语法不是这种普通函数调用。
 
-```cpp
+**Correct Answer (English):** It is invalid. Launch the kernel first, then
+check launch and runtime failures separately:
+
+**正确答案（中文）：** 不能这样写。应先启动 kernel，再分别检查 launch error
+和 runtime error：
+
+~~~cpp
 vectorAdd<<<numBlocks, blockSize>>>(d_a, d_b, d_c, n);
 
 CUDA_CHECK(cudaGetLastError());
 CUDA_CHECK(cudaDeviceSynchronize());
-```
+~~~
 
-### 7. `cudaGetLastError` 与 `cudaDeviceSynchronize`
+### 7. cudaGetLastError versus cudaDeviceSynchronize / cudaGetLastError 与 cudaDeviceSynchronize
 
-**Question:** 下面两行分别检查什么？为什么调试阶段通常两行都写？
+**Question (English):** What does each line check, and why are both useful
+during debugging?
 
-```cpp
+**问题（中文）：** 下面两行分别检查什么？为什么调试阶段通常两行都写？
+
+~~~cpp
 CUDA_CHECK(cudaGetLastError());
 CUDA_CHECK(cudaDeviceSynchronize());
-```
+~~~
 
-**Explanation:** kernel launch 可能在启动阶段失败，也可能启动成功但运行过程中失败。调试时需要区分这两类错误。
+**Explanation (English):** A kernel can fail during launch or launch
+successfully and fail while executing.
 
-**Correct Answer:** `CUDA_CHECK(cudaGetLastError())` 通常检查 kernel launch error，例如配置非法或启动失败；`CUDA_CHECK(cudaDeviceSynchronize())` 会等待 GPU 执行完成，并暴露 kernel runtime error，例如 illegal memory access。调试阶段两行都写，可以更快判断错误发生在 launch 阶段还是运行阶段。
+**解说（中文）：** kernel 可能在启动阶段失败，也可能成功启动后在运行过程中
+失败。调试时需要区分这两类错误。
 
-### 8. benchmark 中为什么不能乱加同步
+**Correct Answer (English):** `cudaGetLastError()` commonly checks launch
+configuration and submission failures. `cudaDeviceSynchronize()` waits and
+exposes runtime failures such as an illegal memory access. Together they help
+locate the failure phase.
 
-**Question:** 为什么在 benchmark / 性能测试代码里，不能随便在每个 kernel 后面都加：
+**正确答案（中文）：** `cudaGetLastError()` 通常检查配置非法或启动失败等
+launch error；`cudaDeviceSynchronize()` 等待 GPU 完成并暴露 illegal memory
+access 等 runtime error。两者一起使用有助于定位错误阶段。
 
-```cpp
+### 8. Why synchronization must be deliberate in benchmarks / Benchmark 中为何不能乱加同步
+
+**Question (English):** Why should a benchmark not add
+`cudaDeviceSynchronize()` after every kernel without a deliberate reason?
+
+**问题（中文）：** 为什么 benchmark 中不能随意在每个 kernel 后加入
+`cudaDeviceSynchronize()`？
+
+~~~cpp
 cudaDeviceSynchronize();
-```
+~~~
 
-它可能会怎样影响性能测量？
+**Explanation (English):** Synchronization always makes the CPU wait,
+regardless of whether an error occurred.
 
-**Explanation:** `cudaDeviceSynchronize()` 不只是在出错时才有影响。无论有没有错误，它都会让 CPU 等 GPU 前面提交的工作完成。
+**解说（中文）：** `cudaDeviceSynchronize()` 不只在出错时产生影响；它始终会
+让 CPU 等待 GPU 前面提交的工作完成。
 
-**Correct Answer:** 在 benchmark 中随便加 `cudaDeviceSynchronize()` 会强行打断 GPU 异步执行，破坏 kernel 之间可能的重叠或流水，把额外同步等待时间算进测量里，使结果不能代表真实 pipeline 性能。调试阶段同步有价值，性能测试阶段应谨慎放在明确的测量边界。
+**Correct Answer (English):** Unnecessary synchronization serializes
+asynchronous work, destroys potential overlap or pipelining, and can include
+extra waiting in a measurement. Debug builds benefit from eager
+synchronization; performance tests should synchronize only at defined
+measurement boundaries.
 
-### 9. 最小 `CUDA_CHECK` 宏条件
+**正确答案（中文）：** 随意同步会强行打断 GPU 异步执行，破坏 kernel 间可能的
+重叠或流水，并把额外等待计入测量。调试阶段同步有价值，性能测试阶段应只在明确
+的测量边界同步。
 
-**Question:** 补全一个最小 CUDA API 错误检查宏的核心逻辑：
+### 9. Minimal CUDA_CHECK condition / 最小 CUDA_CHECK 条件
 
-```cpp
+**Question (English):** Complete the core failure condition:
+
+**问题（中文）：** 补全最小 CUDA API 错误检查宏的核心条件：
+
+~~~cpp
 #define CUDA_CHECK(call)                         \
     do {                                         \
         cudaError_t err = (call);                \
@@ -155,70 +263,90 @@ cudaDeviceSynchronize();
             exit(1);                             \
         }                                        \
     } while (0)
-```
+~~~
 
-空白处应该写什么？为什么？
+**Explanation (English):** `cudaSuccess` represents success, so failure means
+the result differs from it.
 
-**Explanation:** CUDA API 返回 `cudaSuccess` 表示成功，因此判断失败时要检查返回值是否不是 `cudaSuccess`。
+**解说（中文）：** CUDA API 返回 `cudaSuccess` 表示成功，因此失败条件是返回值
+不等于 `cudaSuccess`。
 
-**Correct Answer:** 空白处应写：
+**Correct Answer (English):** Fill in `err != cudaSuccess`. When true, the
+call failed and the program should report or handle the error.
 
-```cpp
-err != cudaSuccess
-```
+**正确答案（中文）：** 空白处应写 `err != cudaSuccess`。含义是 CUDA API
+返回值不是成功状态，需要打印错误并停止程序或进行错误处理。
 
-完整含义是：如果 CUDA API 返回值不是 `cudaSuccess`，就说明调用失败，需要打印错误并停止程序或进行错误处理。
+### 10. Minimal debug launch template / 调试阶段最小 kernel 调用模板
 
-### 10. 调试阶段 kernel 调用模板
+**Question (English):** Write the minimal debugging sequence containing a
+kernel launch, a launch-error check, and synchronization with a runtime-error
+check.
 
-**Question:** 请按顺序写出一个“调试阶段”的最小 CUDA kernel 调用模板，包含：
+**问题（中文）：** 按顺序写出包含 kernel launch、launch error 检查，以及同步
+并检查 runtime error 的最小调试模板。
 
-```text
-1. kernel launch
-2. 检查 launch error
-3. 同步并检查 runtime error
-```
+**Explanation (English):** Kernel arguments normally pass device pointers
+such as `d_a` directly, not `&d_a`.
 
-**Explanation:** 调试 CUDA kernel 时，既要检查启动是否成功，也要让运行时错误尽早暴露。kernel 参数通常直接传 device pointer，例如 `d_a`，而不是 `&d_a`。
+**解说（中文）：** 调试 CUDA kernel 时既要检查启动，也要让运行时错误尽早暴露。
+kernel 参数通常直接传 device pointer，例如 `d_a`，而不是 `&d_a`。
 
-**Correct Answer:** 最小调试模板是：
+**Correct Answer (English):**
 
-```cpp
+**正确答案（中文）：**
+
+~~~cpp
 vectorAdd<<<numBlocks, blockSize>>>(d_a, d_b, d_c, n);
 
 CUDA_CHECK(cudaGetLastError());       // launch error
 CUDA_CHECK(cudaDeviceSynchronize());  // runtime error, debug only
-```
+~~~
 
-`cudaGetLastError()` 和 `cudaDeviceSynchronize()` 都是返回 `cudaError_t` 的 CUDA Runtime API，因此可以被 `CUDA_CHECK(...)` 包装。
+**English:** Both checking functions return `cudaError_t` and can therefore
+be wrapped in `CUDA_CHECK(...)`.
 
-## 今日总结
+**中文：** 两个检查函数都返回 `cudaError_t`，因此可以被
+`CUDA_CHECK(...)` 包装。
 
-今天已经理解：
+## Summary / 今日总结
 
-- `cudaError_t` 是 CUDA Runtime API 的错误返回类型
-- `cudaSuccess` 表示成功
-- `err != cudaSuccess` 表示出错
-- CUDA API 返回值要检查
-- `cudaGetErrorString(err)` 用于输出可读错误信息
-- `CUDA_CHECK` 宏用于封装重复错误检查
-- `do { ... } while (0)` 是多行宏的安全写法
-- kernel launch 不能直接塞进 `CUDA_CHECK`
-- kernel launch 后用 `cudaGetLastError()` 检查 launch error
-- 调试时用 `cudaDeviceSynchronize()` 暴露 runtime error
-- benchmark 中不能随便加 synchronize
+- **English:** CUDA Runtime API return values must be checked, and
+  `cudaGetErrorString` turns them into readable diagnostics.
+  **中文：** CUDA Runtime API 返回值必须检查，`cudaGetErrorString` 可生成
+  可读诊断。
+- **English:** `CUDA_CHECK` centralizes repetitive host-side checks, and the
+  do-while-zero pattern makes a multi-line macro safe.
+  **中文：** `CUDA_CHECK` 集中封装 Host 端重复检查，do-while-zero 让多行宏
+  更安全。
+- **English:** A kernel launch is checked after submission, not passed
+  directly to the macro.
+  **中文：** kernel launch 应在提交后检查，不能直接传给宏。
+- **English:** Launch and runtime failures require different checks.
+  **中文：** launch error 与 runtime error 需要不同检查。
+- **English:** Synchronization policy differs between debugging and
+  performance measurement.
+  **中文：** 调试与性能测量应采用不同的同步策略。
 
-## 易错点
+## Common Mistakes / 易错点
 
-- `err != cudaSuccess` 表示出错，不是成功。
-- `CUDA_CHECK` 是 host 端 C/C++ 宏，不是 device 端逻辑。
-- kernel launch 语法不是返回 `cudaError_t` 的普通函数调用。
-- device pointer 参数通常传 `d_a`，不是 `&d_a`。
-- `cudaDeviceSynchronize()` 对调试有帮助，但会影响 benchmark 语义。
+- **English:** Reading `err != cudaSuccess` as success instead of failure.
+  **中文：** 把 `err != cudaSuccess` 误读为成功，而不是失败。
+- **English:** Treating `CUDA_CHECK` as device-side logic.
+  **中文：** 把 `CUDA_CHECK` 当成 Device 端逻辑；它是 Host 端 C/C++ 宏。
+- **English:** Passing `&d_a` instead of the device pointer `d_a` to a
+  kernel.
+  **中文：** 把 `&d_a` 而不是 Device 指针 `d_a` 传给 kernel。
+- **English:** Adding synchronization everywhere and changing benchmark
+  semantics.
+  **中文：** 到处加入同步，从而改变 benchmark 语义。
 
-## 下一步
+## Next Steps / 下一步
 
-- 把 `CUDA_CHECK` 宏加入第一个 vector add 程序
-- 对每个 CUDA API 调用加错误检查
-- 在调试版本中加入 kernel 后的 launch/runtime 检查
-- 后续学习 global memory 访问与 coalescing 入门
+- **English:** Add `CUDA_CHECK` to the vector-add program and check every CUDA
+  API call.
+  **中文：** 把 `CUDA_CHECK` 加入 vector add，并检查每个 CUDA API 调用。
+- **English:** Keep launch/runtime checks in the debug build, then continue to
+  global-memory access and coalescing.
+  **中文：** 在调试版本加入 launch/runtime 检查，再学习 global memory 访问与
+  coalescing。

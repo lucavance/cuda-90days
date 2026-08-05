@@ -1,82 +1,114 @@
-# Day 012: CUDA C++ Program Structure
+# Day 012: CUDA C++ Program Structure / CUDA C++ 程序结构
 
-Date: 2026-06-26
+Date / 日期: 2026-06-26
 
-## 今日目标
+## Topic / 主题
 
-结合 C++ / Python 学习背景，通过 10 个交互式问答理解一个最小 CUDA C++ 程序的结构：host code 在 CPU 上负责准备数据、分配内存、发起 kernel；device code 在 GPU 上并行执行计算。
+**English:** Host and device code, `__global__` kernels, launch syntax,
+global indexing, host/device allocation, copy directions, asynchronous
+execution, error checks, and the minimal CUDA C++ control flow.
 
-## 10 个概念问题
+**中文：** Host/Device code、`__global__` kernel、launch 语法、全局索引、
+Host/Device 分配、拷贝方向、异步执行、错误检查与最小 CUDA C++ 控制流。
 
-### 1. `main()` 和 `__global__` kernel 分别运行在哪里？
+## Goal / 目标
 
-**Question:** 在一个 CUDA C++ 程序里，下面两段代码分别运行在哪里？
+**English:** Connect C++ host-side orchestration with GPU-side parallel
+execution in a complete minimal CUDA C++ program.
 
-```cpp
+**中文：** 结合 C++/Python 学习背景，把 CPU 端流程编排与 GPU 端并行执行连接成
+一个完整的最小 CUDA C++ 程序。
+
+## 10 Concept Questions / 10 个概念问题
+
+### 1. Where main and a kernel execute / main 与 kernel 在哪里执行
+
+**Question (English):** Which function runs on the CPU and which runs on the
+GPU?
+
+**问题（中文）：** 下面两个函数分别在 CPU 还是 GPU 上运行？
+
+~~~cpp
 int main() {
     // ...
 }
-```
+~~~
 
-和：
-
-```cpp
+~~~cpp
 __global__ void vectorAdd(float* a, float* b, float* c, int n) {
     // ...
 }
-```
+~~~
 
-请说明哪一段在 CPU 上运行，哪一段在 GPU 上运行。
+**Explanation (English):** CUDA source contains both host and device code.
+Their execution locations determine allocation, copies, and launch behavior.
 
-**Explanation:** CUDA 程序通常同时包含 host code 和 device code。理解它们分别在哪里执行，是理解后续内存分配、数据拷贝和 kernel launch 的基础。
+**解说（中文）：** CUDA 源码同时包含 Host code 与 Device code。理解执行位置是
+理解分配、拷贝和 launch 的基础。
 
-**Correct Answer:** `main()` 是 host code，运行在 CPU 上；`__global__` 修饰的 `vectorAdd` 是 kernel，由 CPU 端发起 launch，但函数体在 GPU 上由大量 thread 并行执行。
+**Correct Answer (English):** `main()` is host code on the CPU.
+`vectorAdd` is a `__global__` kernel launched by the host and executed in
+parallel by GPU threads.
 
-### 2. kernel launch 调用的组成
+**正确答案（中文）：** `main()` 是运行在 CPU 上的 Host code；
+`__global__` 修饰的 `vectorAdd` 由 Host 发起 launch，函数体由大量 GPU
+thread 并行执行。
 
-**Question:** 下面这个调用是什么意思？
+### 2. Parts of a kernel launch / Kernel launch 的组成
 
-```cpp
+**Question (English):** Explain each part:
+
+**问题（中文）：** 解释下面 launch 的各组成部分：
+
+~~~cpp
 vectorAdd<<<numBlocks, blockSize>>>(d_a, d_b, d_c, n);
-```
+~~~
 
-请分别解释：
+**Explanation (English):** `<<<...>>>` is CUDA launch configuration, not a
+normal function argument list.
 
-```text
-vectorAdd
-<<<numBlocks, blockSize>>>
-d_a, d_b, d_c, n
-```
+**解说（中文）：** `<<<...>>>` 是 CUDA 特有的 launch 配置，不是普通函数参数。
 
-**Explanation:** CUDA kernel launch 看起来像函数调用，但中间的 `<<<...>>>` 是 CUDA 特有的 launch 配置，不是普通函数参数。
+**Correct Answer (English):** `vectorAdd` is the kernel name;
+`<<<numBlocks, blockSize>>>` specifies blocks and threads per block; and
+`d_a, d_b, d_c, n` are kernel arguments, normally three device pointers and
+an element count.
 
-**Correct Answer:** `vectorAdd` 是 kernel 函数名；`<<<numBlocks, blockSize>>>` 是 kernel launch 配置，表示启动多少个 block、每个 block 有多少个 thread；`d_a, d_b, d_c, n` 是传给 kernel 函数体的实参，其中 `d_a/d_b/d_c` 通常是 device pointer，`n` 是元素数量。
+**正确答案（中文）：** `vectorAdd` 是 kernel 名；
+`<<<numBlocks, blockSize>>>` 指定 block 数与每 block 的 thread 数；
+`d_a, d_b, d_c, n` 是函数体实参，通常是三个 Device pointer 和元素数量。
 
-### 3. `__global__` 的含义
+### 3. Meaning of __global__ / __global__ 的含义
 
-**Question:** 在 CUDA C++ 里，为什么 kernel 函数通常要加这个修饰符？
+**Question (English):** Who calls a `__global__` function, and where does it
+execute?
 
-```cpp
-__global__
-```
+**问题（中文）：** `__global__` 函数由谁调用、在哪里执行？
 
-例如：
-
-```cpp
+~~~cpp
 __global__ void vectorAdd(float* a, float* b, float* c, int n)
-```
+~~~
 
-`__global__` 表示这个函数由谁调用、在哪里执行？
+**Explanation (English):** CUDA qualifiers describe call and execution
+locations.
 
-**Explanation:** CUDA 使用函数修饰符区分函数的调用位置和执行位置。`__global__` 是 kernel 函数最常见的修饰符。
+**解说（中文）：** CUDA 使用函数修饰符区分调用位置与执行位置。
 
-**Correct Answer:** `__global__` 表示函数由 host 端调用，并在 device 端执行。也就是 CPU 通过 `kernel<<<...>>>(...)` 发起 launch，GPU 执行 kernel 函数体。
+**Correct Answer (English):** A `__global__` function is launched from host
+code and executes on the device. The CPU uses
+`kernel<<<...>>>(...)`; GPU threads run the body.
 
-### 4. 为什么同一份 kernel 代码能处理不同元素？
+**正确答案（中文）：** `__global__` 表示函数由 Host 调用并在 Device 执行。
+CPU 使用 `kernel<<<...>>>(...)` 发起 launch，GPU thread 执行函数体。
 
-**Question:** 在下面这段 kernel 中：
+### 4. Same code, different elements / 同一份代码处理不同元素
 
-```cpp
+**Question (English):** Why do threads executing the same function process
+different array elements?
+
+**问题（中文）：** 为什么每个 thread 执行同一个函数体，却处理不同数组元素？
+
+~~~cpp
 __global__ void vectorAdd(float* a, float* b, float* c, int n) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -84,163 +116,221 @@ __global__ void vectorAdd(float* a, float* b, float* c, int n) {
         c[idx] = a[idx] + b[idx];
     }
 }
-```
+~~~
 
-为什么每个 thread 都会执行同一份代码，但最终处理的是不同的数组元素？
+**Explanation (English):** CUDA follows a many-threads, same-code model, with
+differences supplied by built-in indices.
 
-**Explanation:** CUDA kernel 是 many threads execute the same code 的模型。不同 thread 的差异主要来自内置索引变量。
+**解说（中文）：** CUDA 是 many threads execute the same code 的模型，各 thread
+的差异主要来自内置索引变量。
 
-**Correct Answer:** 每个 thread 都执行同一个 `vectorAdd` 函数体，但每个 thread 的 `blockIdx.x` 和 `threadIdx.x` 不同，所以 `idx = blockIdx.x * blockDim.x + threadIdx.x` 的结果不同。不同的 `idx` 对应不同数组元素。
+**Correct Answer (English):** Each thread has different `blockIdx.x` and/or
+`threadIdx.x` values, producing a different global `idx` and therefore a
+different element.
 
-### 5. 最小 CUDA C++ 程序步骤顺序
+**正确答案（中文）：** 各 thread 的 `blockIdx.x` 和/或 `threadIdx.x` 不同，
+因此计算出不同全局 `idx`，对应不同数组元素。
 
-**Question:** 在 CUDA C++ 程序里，下面这些步骤通常应该按什么顺序出现？
+### 5. Minimal program order / 最小程序步骤顺序
 
-```text
+**Question (English):** Order these host-side steps:
+
+**问题（中文）：** 排列下面 Host 端步骤：
+
+~~~text
 A. cudaMemcpy 把输入从 host 拷到 device
 B. cudaMalloc 在 device 上分配内存
 C. 在 host 上准备输入数据
 D. 启动 kernel
 E. cudaMemcpy 把结果从 device 拷回 host
 F. cudaFree 释放 device memory
-```
+~~~
 
-请给出顺序，并简单说明原因。
+**Explanation (English):** Data dependencies require preparation and
+allocation before transfer and compute, followed by result transfer and
+cleanup.
 
-**Explanation:** CUDA host 端流程有清晰的数据依赖：先准备和分配，再拷贝输入，再计算，再拷贝输出，最后释放资源。
+**解说（中文）：** 数据依赖决定先准备和分配，再拷入、计算、拷回，最后释放。
 
-**Correct Answer:** 正确顺序是 `C -> B -> A -> D -> E -> F`，也就是：
+**Correct Answer (English):** `C -> B -> A -> D -> E -> F`:
 
-```text
+**正确答案（中文）：** `C -> B -> A -> D -> E -> F`：
+
+~~~text
 prepare -> allocate -> copy in -> compute -> copy out -> cleanup
-```
+~~~
 
-### 6. `new` 和 `cudaMalloc` 的区别
+### 6. new versus cudaMalloc / new 与 cudaMalloc
 
-**Question:** 下面两行代码有什么区别？
+**Question (English):** Where does each allocation live, and who can directly
+access it?
 
-```cpp
+**问题（中文）：** 下面两种分配分别在哪里，谁能直接访问？
+
+~~~cpp
 float* h_a = new float[n];
-```
-
-和：
-
-```cpp
 cudaMalloc(&d_a, n * sizeof(float));
-```
+~~~
 
-请从“在哪里分配内存”和“谁能直接访问”两个角度回答。
+**Explanation (English):** CUDA programs contain both host and device
+pointers, which must not be confused.
 
-**Explanation:** CUDA 程序经常同时存在 host pointer 和 device pointer。区分它们能避免把 CPU 内存和 GPU 内存混用。
+**解说（中文）：** CUDA 程序同时存在 Host pointer 与 Device pointer，必须区分。
 
-**Correct Answer:** `new float[n]` 在 host memory / CPU 内存中分配 `n` 个 `float`，CPU 代码可以直接访问。`cudaMalloc` 在 device/global memory / GPU 显存中分配 `n * sizeof(float)` 字节，GPU kernel 可以直接访问；CPU 代码通常不能像普通数组一样直接解引用 device pointer。
+**Correct Answer (English):** `new` allocates `n` floats in CPU host memory,
+directly accessible to CPU code. `cudaMalloc` allocates bytes in GPU
+device/global memory, directly accessible to kernels; host code normally
+cannot dereference it like an array.
 
-### 7. `cudaMemcpy` 为什么要指定方向？
+**正确答案（中文）：** `new float[n]` 在 CPU Host memory 分配 `n` 个
+`float`；`cudaMalloc` 在 GPU Device/global memory 分配字节。CPU 能直接访问
+前者，GPU kernel 能直接访问后者；CPU 通常不能把 Device pointer 当普通数组
+解引用。
 
-**Question:** `cudaMemcpy` 里为什么需要指定方向？比如：
+### 7. Copy direction / cudaMemcpy 为何指定方向
 
-```cpp
+**Question (English):** Why does `cudaMemcpy` require a direction, and what
+can happen if it is wrong?
+
+**问题（中文）：** 为什么 `cudaMemcpy` 需要指定方向？方向写反可能怎样？
+
+~~~cpp
 cudaMemcpy(d_a, h_a, size, cudaMemcpyHostToDevice);
 cudaMemcpy(h_c, d_c, size, cudaMemcpyDeviceToHost);
-```
+~~~
 
-如果方向写反了，可能会发生什么？
+**Explanation (English):** Source and destination can belong to different
+address spaces.
 
-**Explanation:** `cudaMemcpy` 的源地址和目标地址可能属于不同内存空间，必须明确数据方向。
+**解说（中文）：** 源地址与目标地址可能属于不同内存空间，必须明确数据方向。
 
-**Correct Answer:** `cudaMemcpy` 的参数顺序是 `cudaMemcpy(dst, src, size, direction)`。方向用于说明数据是在 host 和 device 之间如何移动。如果方向写反，可能 API 返回错误，也可能导致结果错误，甚至用错误数据覆盖目标缓冲区。
+**Correct Answer (English):** The signature is
+`cudaMemcpy(dst, src, size, direction)`. A mismatched direction can return an
+API error, produce incorrect data, or overwrite the wrong buffer.
 
-### 8. kernel launch 默认同步还是异步？
+**正确答案（中文）：** 参数顺序是 `cudaMemcpy(dst, src, size, direction)`。
+方向写反可能导致 API 错误、错误结果，或用错误数据覆盖目标缓冲区。
 
-**Question:** CUDA kernel launch 默认是同步还是异步的？也就是说，CPU 执行到：
+### 8. Asynchronous kernel launch / Kernel launch 的异步性
 
-```cpp
+**Question (English):** Does the CPU normally wait after this launch?
+
+**问题（中文）：** CPU 执行下面 launch 后通常会等待 GPU 完成吗？
+
+~~~cpp
 vectorAdd<<<numBlocks, blockSize>>>(d_a, d_b, d_c, n);
-```
+~~~
 
-之后，会等 GPU kernel 完全执行完再继续下一行吗？还是通常会继续往下执行？
+**Explanation (English):** Host and device timelines are not inherently
+synchronized.
 
-**Explanation:** CUDA host code 和 device work 的执行时间线并不完全同步。理解异步 launch 对调试和性能都很重要。
+**解说（中文）：** Host code 与 Device work 的时间线并不天然同步。
 
-**Correct Answer:** kernel launch 对 host 来说通常是异步的。CPU 发起 kernel 后通常马上继续执行下一行，不会自动等待 GPU kernel 完成。常见同步点包括 `cudaDeviceSynchronize()` 和同步的 device-to-host `cudaMemcpy`。
+**Correct Answer (English):** The launch is normally asynchronous to the host.
+The CPU continues until a synchronization point such as
+`cudaDeviceSynchronize()` or a synchronous device-to-host copy.
 
-### 9. `cudaGetLastError()` 和 `cudaDeviceSynchronize()`
+**正确答案（中文）：** kernel launch 对 Host 通常异步。CPU 会继续执行，直到
+`cudaDeviceSynchronize()` 或同步的 Device-to-Host 拷贝等同步点。
 
-**Question:** 为什么 kernel launch 后经常要写这两句？
+### 9. Launch and runtime checks / Launch 与 runtime 检查
 
-```cpp
+**Question (English):** What does each function primarily reveal?
+
+**问题（中文）：** 下面两个函数分别主要检查什么？
+
+~~~cpp
 cudaGetLastError();
 cudaDeviceSynchronize();
-```
+~~~
 
-它们分别主要检查什么问题？
+**Explanation (English):** Some failures are available immediately after
+launch; others occur during execution.
 
-**Explanation:** kernel launch 可能有立即暴露的 launch 错误，也可能有执行过程中才暴露的 runtime 错误。
+**解说（中文）：** 一些错误会在 launch 后立即出现，另一些在执行过程中才发生。
 
-**Correct Answer:** `cudaGetLastError()` 主要检查 kernel launch 是否立刻失败，例如 launch 配置非法、参数错误等。`cudaDeviceSynchronize()` 等待 GPU 前面提交的任务完成，并可能暴露 kernel 执行过程中的错误，例如 illegal memory access。
+**Correct Answer (English):** `cudaGetLastError()` commonly detects immediate
+launch failures such as invalid configuration. `cudaDeviceSynchronize()`
+waits for completion and can reveal runtime failures such as illegal memory
+access.
 
-### 10. 最小 CUDA C++ host 端流程
+**正确答案（中文）：** `cudaGetLastError()` 通常检查配置非法等即时 launch
+error；`cudaDeviceSynchronize()` 等待任务完成并暴露 illegal memory access
+等 runtime error。
 
-**Question:** 请用自己的话总结一个最小 CUDA C++ 程序的 host 端流程，从准备数据到释放资源，大概有哪些步骤？
+### 10. Complete host-side flow / 完整 Host 端流程
 
-**Explanation:** 这是把今天所有知识串起来的主线。CUDA C++ 程序通常由 CPU 端完成流程编排，由 GPU 端完成并行计算。
+**Question (English):** Summarize the host-side flow from data preparation to
+cleanup.
 
-**Correct Answer:** 一个最小 CUDA C++ 程序的 host 端流程通常是：
+**问题（中文）：** 总结从数据准备到资源释放的最小 CUDA C++ Host 端流程。
 
-```text
+**Explanation (English):** The CPU orchestrates while the GPU performs
+parallel computation.
+
+**解说（中文）：** CPU 负责流程编排，GPU 负责并行计算。
+
+**Correct Answer (English):**
+
+**正确答案（中文）：**
+
+~~~text
 prepare -> allocate -> copy in -> compute -> copy out -> cleanup
-```
+~~~
 
-对应代码层面：
-
-```cpp
-// 1. host 准备数据
+~~~cpp
+// 1. Prepare host data / Host 准备数据
 float* h_a = new float[n];
 
-// 2. device 分配内存
+// 2. Allocate device memory / Device 分配内存
 cudaMalloc(&d_a, size);
 
-// 3. host -> device
+// 3. Host -> device
 cudaMemcpy(d_a, h_a, size, cudaMemcpyHostToDevice);
 
-// 4. 启动 kernel
+// 4. Launch kernel / 启动 kernel
 vectorAdd<<<numBlocks, blockSize>>>(d_a, d_b, d_c, n);
 
-// 5. device -> host
+// 5. Device -> host
 cudaMemcpy(h_c, d_c, size, cudaMemcpyDeviceToHost);
 
-// 6. 释放资源
+// 6. Release resources / 释放资源
 cudaFree(d_a);
 delete[] h_a;
-```
+~~~
 
-## 今日总结
+## Summary / 今日总结
 
-今天已经理解：
+- **English:** `main()` orchestrates on the CPU; `__global__` kernels execute
+  on the GPU.
+  **中文：** `main()` 在 CPU 编排；`__global__` kernel 在 GPU 执行。
+- **English:** `<<<...>>>` is launch configuration, while the following
+  parentheses contain kernel arguments.
+  **中文：** `<<<...>>>` 是 launch 配置，后续圆括号才包含 kernel 实参。
+- **English:** Host and device allocation and explicit copy directions form
+  the data path.
+  **中文：** Host/Device 分配与显式拷贝方向构成数据路径。
+- **English:** Launches are asynchronous and need distinct launch/runtime
+  checks.
+  **中文：** launch 是异步的，需要分别检查 launch/runtime error。
 
-- `main()` 是 host code，在 CPU 上运行。
-- `__global__` kernel 由 CPU 发起，在 GPU 上执行。
-- `<<<numBlocks, blockSize>>>` 是 kernel launch 配置，不是普通函数参数。
-- kernel 实参如 `d_a, d_b, d_c, n` 才是传入函数体的数据。
-- 每个 thread 执行同一份 kernel 代码，但通过不同 `idx` 处理不同元素。
-- `new float[n]` 分配 host memory。
-- `cudaMalloc` 分配 device/global memory。
-- `cudaMemcpy(dst, src, size, direction)` 需要明确方向。
-- kernel launch 默认对 CPU 异步。
-- `cudaGetLastError()` 检查 launch 错误。
-- `cudaDeviceSynchronize()` 等待 kernel 完成并暴露运行期错误。
+## Common Mistakes / 易错点
 
-## 易错点
+- **English:** Treating `<<<...>>>` as ordinary kernel arguments.
+  **中文：** 把 `<<<...>>>` 当成 kernel 普通参数。
+- **English:** Treating `n` as the maximum valid index instead of the element
+  count; valid indices are `0..n-1`.
+  **中文：** 把 `n` 当最大有效索引，而不是元素数；有效索引是 `0..n-1`。
+- **English:** Expecting `cudaGetLastError()` to wait for kernel completion.
+  **中文：** 误以为 `cudaGetLastError()` 会等待 kernel 完成。
+- **English:** Dereferencing a device pointer from ordinary CPU code.
+  **中文：** 在普通 CPU 代码中直接解引用 Device pointer。
 
-- `<<<...>>>` 不是传给 kernel 函数体的普通参数，而是 launch 配置。
-- `n` 是元素数量，不是最大索引；有效索引是 `0 ~ n - 1`。
-- `cudaGetLastError()` 不负责等待 kernel 完成。
-- CPU 不能像访问普通数组一样直接访问 `cudaMalloc` 得到的 device pointer。
-- kernel launch 后 CPU 通常继续往下执行，除非遇到同步点。
+## Next Steps / 下一步
 
-## 下一步
-
-- 写一个完整 `vectorAdd.cu`
-- 练习从 C++ host code 到 CUDA kernel 的完整编译和运行
-- 增加 CUDA error checking helper
-- 对比 Python for loop、C++ for loop 和 CUDA kernel 的执行模型
+- **English:** Write and run a complete `vectorAdd.cu` with reusable CUDA
+  error checking.
+  **中文：** 编写并运行完整 `vectorAdd.cu`，加入可复用 CUDA error checking。
+- **English:** Compare Python loops, C++ loops, and CUDA kernels as execution
+  models.
+  **中文：** 对比 Python for loop、C++ for loop 与 CUDA kernel 的执行模型。
