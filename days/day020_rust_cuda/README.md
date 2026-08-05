@@ -20,7 +20,7 @@ asynchronous execution.
 **中文：** 建立一套实用思维模型，能够安全地协调 Rust Host 代码与 CUDA Device
 代码，尤其理解独立内存空间和异步执行带来的要求。
 
-## 10 Concept Questions / 10 道概念题
+## 10 Concept Questions / 10 个概念问题
 
 ### 1. Host and device execution / Host 与 Device 执行
 

@@ -20,7 +20,7 @@ handling, and moving data into a new thread.
 **中文：** 建立一套实用的 Rust 所有权与类型系统思维模型，为理解安全内存
 访问、错误处理以及在线程间移动数据打下基础。
 
-## 10 Concept Questions / 10 道概念题
+## 10 Concept Questions / 10 个概念问题
 
 ### 1. Immutable and mutable bindings / 不可变与可变绑定
 

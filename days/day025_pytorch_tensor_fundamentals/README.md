@@ -21,7 +21,7 @@ operations, without introducing neural-network training.
 **中文：** 在不引入神经网络训练的前提下，建立一套轻量的 Tensor 思维模型，
 能够阅读基础 PyTorch 代码，并判断常见操作产生的数据类型、形状、设备与结果值。
 
-## 10 Concept Questions / 10 道概念题
+## 10 Concept Questions / 10 个概念问题
 
 ### 1. Tensor type, dimension, and shape / Tensor 类型、维度与形状
 

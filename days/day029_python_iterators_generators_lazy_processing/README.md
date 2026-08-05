@@ -37,7 +37,7 @@ resumes from that point on the next request.
 生成器是实现这种有状态迭代器的一种便捷方式：代码按需开始执行，在每个 `yield`
 处暂停，并在下一次请求元素时从暂停位置继续。
 
-## 10 Concept Questions / 10 道概念题
+## 10 Concept Questions / 10 个概念问题
 
 ### 1. Iterable versus iterator / 可迭代对象与迭代器
 

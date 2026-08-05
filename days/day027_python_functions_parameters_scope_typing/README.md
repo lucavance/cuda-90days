@@ -24,7 +24,7 @@ defaults and clear type contracts for benchmark-data processing.
 绑定，进而为 benchmark 数据处理编写具有安全默认值和清晰类型契约的可复用
 函数。
 
-## 10 Concept Questions / 10 道概念题
+## 10 Concept Questions / 10 个概念问题
 
 ### 1. Local scope and name shadowing / 局部作用域与名字遮蔽
 

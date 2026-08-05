@@ -24,7 +24,7 @@ required `unsafe` operations behind a narrow safe interface.
 **中文：** 建立一套实用思维模型，能够通过 CUDA Driver API 从 Rust 驱动带边界
 检查的向量加法 kernel，并把必要的 `unsafe` 操作限制在狭窄的安全接口之后。
 
-## 10 Concept Questions / 10 道概念题
+## 10 Concept Questions / 10 个概念问题
 
 ### 1. End-to-end Driver API sequence / Driver API 端到端顺序
 

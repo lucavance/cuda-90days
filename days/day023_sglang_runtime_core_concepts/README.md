@@ -23,7 +23,7 @@ installation or coding experiments.
 SGLang 运行时思维模型：理解请求如何被准入、如何共享有限的 GPU 与 KV cache
 资源、如何复用完全相同的 token 前缀，以及如何权衡 TTFT、TPOT、吞吐与公平性。
 
-## 10 Concept Questions / 10 道概念题
+## 10 Concept Questions / 10 个概念问题
 
 ### 1. Request lifecycle and admission / 请求生命周期与准入
 

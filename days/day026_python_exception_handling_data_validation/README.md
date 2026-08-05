@@ -23,7 +23,7 @@ batch.
 **中文：** 建立一套可靠的异常控制流模型，能够编写小型 Python 工具来拒绝无效
 benchmark 记录，同时避免单个缺失、格式损坏或语义错误的输入终止整个批处理。
 
-## 10 Concept Questions / 10 道概念题
+## 10 Concept Questions / 10 个概念问题
 
 ### 1. Unhandled exceptions / 未处理的异常
 

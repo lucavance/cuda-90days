@@ -21,7 +21,7 @@ sets without confusing their types or set-operation meanings.
 **中文：** 建立一套实用思维模型，能够用推导式、不可变元组和集合简洁处理实验
 记录，并分清各自类型与集合运算的含义。
 
-## 10 Concept Questions / 10 道概念题
+## 10 Concept Questions / 10 个概念问题
 
 ### 1. List comprehension versus explicit loop / 列表推导式与显式循环
 

@@ -39,7 +39,7 @@ its package identity.
 代码，然后在导入方作用域中绑定名字。包提供限定模块名和相对导入所需的上下文；
 <code>-m</code> 选项通过导入系统执行模块，从而保留其包身份。
 
-## 10 Concept Questions / 10 道概念题
+## 10 Concept Questions / 10 个概念问题
 
 ### 1. What a first import does / 首次导入会做什么
 

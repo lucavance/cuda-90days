@@ -20,7 +20,7 @@ and other processes.
 **中文：** 理解 Ubuntu Shell 如何创建和管理命令、如何收集进程状态，以及如何
 把标准流连接到文件和其他进程。
 
-## 10 Concept Questions / 10 道概念题
+## 10 Concept Questions / 10 个概念问题
 
 ### 1. `fork` and `exec` / `fork` 与 `exec`
 

@@ -22,7 +22,7 @@ read, write, and parse benchmark result files.
 **中文：** 建立一套可靠的思维模型，分清“构造路径”和“操作文件系统”，并能够
 编写小型脚本，安全地定位、读取、写入和解析 benchmark 结果文件。
 
-## 10 Concept Questions / 10 道概念题
+## 10 Concept Questions / 10 个概念问题
 
 ### 1. Path objects and relative paths / Path 对象与相对路径
 

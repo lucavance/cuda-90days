@@ -43,7 +43,7 @@ Stride values are measured in elements, not bytes.
 
 stride 的单位是元素数量，而不是字节数量。
 
-## 10 Concept Questions / 10 道概念题
+## 10 Concept Questions / 10 个概念问题
 
 ### 1. Shape and strides of a contiguous matrix / 连续矩阵的形状与步幅
 

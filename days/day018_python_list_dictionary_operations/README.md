@@ -20,7 +20,7 @@ scripts.
 **中文：** 建立对 Python 可变集合的实用思维模型，并掌握在自动化脚本中处理
 结构化实验数据的常见模式。
 
-## 10 Concept Questions / 10 道概念题
+## 10 Concept Questions / 10 个概念问题
 
 ### 1. Shared list object / 共享列表对象
 

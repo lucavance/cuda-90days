@@ -40,7 +40,7 @@ return value suppresses an exception, while a false value lets it propagate.
 由 <code>with</code> 关键字统一规定。异常会传给 <code>__exit__()</code>；
 返回真值会抑制异常，返回假值则让异常继续传播。
 
-## 10 Concept Questions / 10 道概念题
+## 10 Concept Questions / 10 个概念问题
 
 ### 1. File state after leaving a context / 离开上下文后的文件状态
 
