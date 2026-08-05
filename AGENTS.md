@@ -66,3 +66,14 @@ interactive questions:
    - 每一道正确答案
    - 总结、常见错误和下一步建议
 10. 提交学习记录前，重新检查所有必要部分是否均包含中文和英文。
+
+## Bilingual Documentation Maintenance / 双语文档维护
+
+- Keep all reader-facing Markdown in paired English-first, Chinese-second form;
+  follow `docs/bilingual_style.md`. / 所有面向读者的 Markdown 均须采用英文在前、
+  中文紧随的配对格式，并遵循 `docs/bilingual_style.md`。
+- Keep executable code, commands, and output as one unchanged canonical block. /
+  可执行代码、命令与输出只保留一份且不得改变行为。
+- Before committing documentation, run `python3 scripts/check_bilingual_docs.py`
+  and the unit-test command documented in the style guide. / 提交文档前运行双语检查器
+  以及规范中记录的单元测试命令。
